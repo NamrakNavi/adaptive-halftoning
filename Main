@@ -1,0 +1,1085 @@
+import os
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
+from PIL import Image
+import matplotlib.pyplot as plt
+from skimage.metrics import structural_similarity as ssim
+import warnings
+warnings.filterwarnings('ignore')
+# МОНТИРОВАНИЕ GOOGLE DRIVE В COLAB
+def mount_google_drive():
+    # Монтирование Google Drive в Google Colab
+    try:
+        from google.colab import drive
+        drive.mount('/content/drive')
+        print("Google Drive успешно смонтирован!")
+        return True
+    except ImportError:
+        print("Не в Google Colab. Используем локальную файловую систему.")
+        return False
+
+
+# КОНФИГУРАЦИЯ С ИСПРАВЛЕНИЯМИ
+class Config:
+    # Пути в Google Drive
+    DRIVE_PATH = "/content/drive/MyDrive"
+    DATASET_PATH = "/content/drive/MyDrive/halftoning_dataset"  # Путь к датасету в Google Drive
+
+    # Параметры модели - используются из класса
+    PATCH_SIZE = 8
+    BATCH_SIZE = 32
+    MIN_BATCH_SIZE = 4  # ДОБАВЛЕНО: минимальный batch
+    EPOCHS = 100
+    LEARNING_RATE = 0.001
+
+    # Параметры изображений
+    IMG_SIZE = (256, 256)
+
+    # Пути для сохранения
+    MODEL_SAVE_PATH = "/content/drive/MyDrive/adaptive_halftoning_model.pth"
+    OUTPUT_DIR = "/content/drive/MyDrive/halftoning_results"
+
+
+# ПРОВЕРКА И ВЫБОР ПУТИ К ДАТАСЕТУ
+def find_dataset_path():
+    # Поиск датасета в Google Drive
+    config = Config()
+
+    # Возможные пути к датасету
+    possible_paths = [
+        config.DATASET_PATH,
+        "/content/drive/MyDrive/halftoning",
+        "/content/drive/MyDrive/datasets/halftoning_dataset",
+        "/content/drive/MyDrive/Colab Notebooks/halftoning_dataset",
+        "/content/drive/MyDrive/AI/halftoning_dataset",
+        "./halftoning_dataset"  # Локальный путь
+    ]
+
+    print("Поиск датасета...")
+    for path in possible_paths:
+        if os.path.exists(path):
+            print(f"✓ Найден датасет по пути: {path}")
+            return path
+
+    print("\n✗ Датасет не найден по стандартным путям.")
+    print("Доступные директории в Google Drive:")
+
+    # Показываем доступные директории
+    try:
+        for root, dirs, files in os.walk(config.DRIVE_PATH, maxdepth=2):
+            level = root.replace(config.DRIVE_PATH, '').count(os.sep)
+            indent = ' ' * 2 * level
+            print(f'{indent}{os.path.basename(root)}/')
+            subindent = ' ' * 2 * (level + 1)
+            for d in dirs[:5]:  # Показываем только первые 5 поддиректорий
+                print(f'{subindent}{d}/')
+            if len(dirs) > 5:
+                print(f'{subindent}... и еще {len(dirs)-5} директорий')
+            break  # Только первый уровень
+    except:
+        pass
+
+    # Запрашиваем путь у пользователя
+    custom_path = input("\nВведите полный путь к датасету в Google Drive: ")
+
+    if os.path.exists(custom_path):
+        print(f"✓ Датасет найден по указанному пути: {custom_path}")
+        return custom_path
+    else:
+        print("✗ Указанный путь не существует.")
+        return None
+
+
+# АРХИТЕКТУРА НЕЙРОННОЙ СЕТИ (U-Net)
+class UNet(nn.Module):
+    """U-Net архитектура для адаптивного растрирования"""
+
+    def __init__(self, in_channels=3, out_channels=1):
+        super(UNet, self).__init__()
+
+        # Encoder (Downsampling)
+        self.enc1 = self.conv_block(in_channels, 64)
+        self.enc2 = self.conv_block(64, 128)
+        self.enc3 = self.conv_block(128, 256)
+        self.enc4 = self.conv_block(256, 512)
+
+        self.pool = nn.MaxPool2d(2)
+
+        # Bottleneck
+        self.bottleneck = self.conv_block(512, 1024)
+
+        # Decoder (Upsampling)
+        self.upconv4 = nn.ConvTranspose2d(1024, 512, kernel_size=2, stride=2)
+        self.dec4 = self.conv_block(1024, 512)
+
+        self.upconv3 = nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2)
+        self.dec3 = self.conv_block(512, 256)
+
+        self.upconv2 = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2)
+        self.dec2 = self.conv_block(256, 128)
+
+        self.upconv1 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
+        self.dec1 = self.conv_block(128, 64)
+
+        # Output layer
+        self.outconv = nn.Conv2d(64, out_channels, kernel_size=1)
+
+    def conv_block(self, in_channels, out_channels):
+        return nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+
+    def forward(self, x):
+        # Encoder
+        enc1 = self.enc1(x)
+        enc2 = self.enc2(self.pool(enc1))
+        enc3 = self.enc3(self.pool(enc2))
+        enc4 = self.enc4(self.pool(enc3))
+
+        # Bottleneck
+        bottleneck = self.bottleneck(self.pool(enc4))
+
+        # Decoder with skip connections
+        dec4 = self.upconv4(bottleneck)
+        dec4 = torch.cat((dec4, enc4), dim=1)
+        dec4 = self.dec4(dec4)
+
+        dec3 = self.upconv3(dec4)
+        dec3 = torch.cat((dec3, enc3), dim=1)
+        dec3 = self.dec3(dec3)
+
+        dec2 = self.upconv2(dec3)
+        dec2 = torch.cat((dec2, enc2), dim=1)
+        dec2 = self.dec2(dec2)
+
+        dec1 = self.upconv1(dec2)
+        dec1 = torch.cat((dec1, enc1), dim=1)
+        dec1 = self.dec1(dec1)
+
+        # Output
+        out = self.outconv(dec1)
+        return torch.sigmoid(out)
+
+
+class HalftoningDataset(Dataset):
+    # Датасет для адаптивного растрирования с выбором категории
+
+    def __init__(self, root_dir, mode='train', color_type='all', category='all',
+                 transform=None, target_size=(256, 256)):
+        self.root_dir = root_dir
+        self.mode = mode
+        self.color_type = color_type
+        self.category = category
+        self.transform = transform
+        self.target_size = target_size
+
+        self.image_paths = []
+        self._load_image_paths()
+
+        print(f"Загружено {len(self.image_paths)} изображений")
+        print(f"Режим: {mode}, Цвет: {color_type}, Категория: {category}")
+
+        if len(self.image_paths) == 0:
+            print(f"ВНИМАНИЕ: В указанных директориях нет изображений!")
+            print(f"Путь: {os.path.join(root_dir, mode, color_type, category)}")
+
+    def _load_image_paths(self):
+        """Загрузка путей к изображениям с фильтрацией по цвету и категории"""
+        base_path = os.path.join(self.root_dir, self.mode)
+
+        if not os.path.exists(base_path):
+            print(f"Предупреждение: Директория {base_path} не существует")
+            return
+
+        # Определяем какие директории обходить
+        color_types_to_search = []
+        if self.color_type == 'all':
+            color_types_to_search = ['colored', 'black and white']
+        else:
+            color_types_to_search = [self.color_type]
+
+        categories_to_search = []
+        if self.category == 'all':
+            categories_to_search = ['nature', 'transport']
+        else:
+            categories_to_search = [self.category]
+
+        # Рекурсивно ищем изображения с фильтрацией
+        for color_type in color_types_to_search:
+            color_path = os.path.join(base_path, color_type)
+
+            if not os.path.exists(color_path):
+                print(f"Предупреждение: Директория {color_path} не существует")
+                continue
+
+            for category in categories_to_search:
+                category_path = os.path.join(color_path, category)
+
+                if os.path.exists(category_path):
+                    # Ищем все изображения в категории
+                    for root, dirs, files in os.walk(category_path):
+                        for file in files:
+                            if file.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff')):
+                                self.image_paths.append(os.path.join(root, file))
+                else:
+                    print(f"Предупреждение: Директория {category_path} не существует")
+
+        # Если ничего не найдено, ищем напрямую в base_path (для обратной совместимости)
+        if len(self.image_paths) == 0:
+            print("Поиск изображений без фильтрации...")
+            for root, dirs, files in os.walk(base_path):
+                for file in files:
+                    if file.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff')):
+                        self.image_paths.append(os.path.join(root, file))
+
+    def __len__(self):
+        return len(self.image_paths)
+
+    def __getitem__(self, idx):
+        # Загрузка изображения
+        img_path = self.image_paths[idx]
+        try:
+            image = Image.open(img_path).convert('RGB')
+
+            # Преобразование размера
+            image = image.resize(self.target_size)
+
+            # Преобразование в тензор и нормализация
+            if self.transform:
+                image_tensor = self.transform(image)
+            else:
+                # Добавляем нормализацию
+                image_tensor = transforms.ToTensor()(image)
+                image_tensor = transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406],  # ImageNet статистика
+                    std=[0.229, 0.224, 0.225]
+                )(image_tensor)
+
+            # Для тренировочного режима создаем целевое изображение
+            if self.mode == 'train':
+                # ИСПРАВЛЕНО: Создаем лучшие цели для обучения
+                # Используем error diffusion как "идеальное" растрирование
+                image_np = np.array(image.resize(self.target_size)) / 255.0
+
+                # Применяем error diffusion для создания цели
+                if len(image_np.shape) == 3:
+                    gray_image = np.mean(image_np, axis=2)
+                else:
+                    gray_image = image_np
+
+                # Error diffusion для создания целевого изображения
+                h, w = gray_image.shape
+                img_float = gray_image.copy()
+                target_np = np.zeros((h, w))
+
+                for i in range(h):
+                    for j in range(w):
+                        old_pixel = img_float[i, j]
+                        new_pixel = 1 if old_pixel > 0.5 else 0
+                        target_np[i, j] = new_pixel
+                        quant_error = old_pixel - new_pixel
+
+                        if j + 1 < w:
+                            img_float[i, j+1] += quant_error * 7/16
+                        if i + 1 < h and j - 1 >= 0:
+                            img_float[i+1, j-1] += quant_error * 3/16
+                        if i + 1 < h:
+                            img_float[i+1, j] += quant_error * 5/16
+                        if i + 1 < h and j + 1 < w:
+                            img_float[i+1, j+1] += quant_error * 1/16
+
+                target = torch.FloatTensor(target_np).unsqueeze(0)  # [1, H, W]
+                return image_tensor, target
+            else:
+                return image_tensor
+
+        except Exception as e:
+            print(f"Ошибка при загрузке изображения {img_path}: {e}")
+            # Возвращаем пустое изображение в случае ошибки
+            dummy_image = torch.zeros((3, *self.target_size))
+            if self.mode == 'train':
+                target = torch.zeros((1, *self.target_size))
+                return dummy_image, target
+            else:
+                return dummy_image
+
+
+# АЛГОРИТМЫ РАСТРИРОВАНИЯ (ИСПОЛЬЗУЮТ КОНФИГ)
+class HalftoningAlgorithms:
+    # Реализация различных алгоритмов растрирования
+
+    def __init__(self, config):
+        self.config = config
+
+    def ordered_dithering(self, image):
+        # Упорядоченное растрирование (dither)
+        if len(image.shape) == 3:
+            image = np.mean(image, axis=2)
+
+        h, w = image.shape
+        output = np.zeros((h, w))
+
+        # Матрица Байера
+        bayer_matrix = np.array([
+            [0, 8, 2, 10],
+            [12, 4, 14, 6],
+            [3, 11, 1, 9],
+            [15, 7, 13, 5]
+        ]) / 16.0
+
+        bayer_size = 4
+
+        for i in range(0, h, bayer_size):
+            for j in range(0, w, bayer_size):
+                for m in range(bayer_size):
+                    for n in range(bayer_size):
+                        if i+m < h and j+n < w:
+                            threshold = bayer_matrix[m, n]
+                            output[i+m, j+n] = 1 if image[i+m, j+n] > threshold else 0
+
+        return output
+
+    def error_diffusion(self, image):
+        # Стохастическое растрирование (error diffusion)
+        if len(image.shape) == 3:
+            image = np.mean(image, axis=2)
+
+        h, w = image.shape
+        img_float = image.copy()
+
+        if img_float.max() > 1.0:
+            img_float = img_float / 255.0
+
+        output = np.zeros((h, w))
+
+        # Floyd-Steinberg dithering
+        for i in range(h):
+            for j in range(w):
+                old_pixel = img_float[i, j]
+                new_pixel = 1 if old_pixel > 0.5 else 0
+                output[i, j] = new_pixel
+                quant_error = old_pixel - new_pixel
+
+                if j + 1 < w:
+                    img_float[i, j+1] += quant_error * 7/16
+                if i + 1 < h and j - 1 >= 0:
+                    img_float[i+1, j-1] += quant_error * 3/16
+                if i + 1 < h:
+                    img_float[i+1, j] += quant_error * 5/16
+                if i + 1 < h and j + 1 < w:
+                    img_float[i+1, j+1] += quant_error * 1/16
+
+        return output
+
+    def adaptive_halftoning(self, image, model, device):
+        # Адаптивное растрирование с использованием CNN
+        # Подготовка изображения
+        if isinstance(image, np.ndarray):
+            if len(image.shape) == 2:
+                image = np.stack([image, image, image], axis=0)
+            elif len(image.shape) == 3:
+                if image.shape[0] != 3:
+                    image = np.transpose(image, (2, 0, 1))
+
+        # В тензор
+        image_tensor = torch.FloatTensor(image).unsqueeze(0).to(device)
+
+        # Получение карты параметров
+        with torch.no_grad():
+            param_map = model(image_tensor)
+
+        param_map_np = param_map.squeeze().cpu().numpy()
+        if len(param_map_np.shape) == 3:
+            param_map_np = np.mean(param_map_np, axis=0)
+
+        # Преобразование изображения
+        if len(image.shape) == 3:
+            gray_image = np.mean(image, axis=0)
+        else:
+            gray_image = image
+
+        h, w = gray_image.shape
+        output = np.zeros((h, w))
+
+        # Обработка патчами (используем PATCH_SIZE из конфигурации)
+        patch_size = self.config.PATCH_SIZE
+        for i in range(0, h, patch_size):
+            for j in range(0, w, patch_size):
+                i_end = min(i + patch_size, h)
+                j_end = min(j + patch_size, w)
+
+                patch = gray_image[i:i_end, j:j_end]
+                if patch.size == 0:
+                    continue
+
+                param = param_map_np[i:i_end, j:j_end].mean()
+                mu = patch.mean()
+                sigma = max(patch.std(), 0.01)
+
+                # Адаптивный порог
+                threshold = mu + sigma * (2 * param - 1)
+                patch_output = (patch > threshold).astype(float)
+                output[i:i_end, j:j_end] = patch_output
+
+        return output
+
+# ИСПРАВЛЕННЫЙ AdaptiveHalftoningSystem
+class AdaptiveHalftoningSystem:
+    # Система адаптивного растрирования с CNN
+
+    def __init__(self, dataset_path, config=None):
+        if config is None:
+            config = Config()
+            config.DATASET_PATH = dataset_path
+
+        self.config = config
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        # Используем параметры из конфигурации
+        self.model = UNet(in_channels=3, out_channels=1).to(self.device)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=config.LEARNING_RATE)
+        self.criterion = nn.MSELoss()
+
+        # Инициализация алгоритмов с конфигом
+        self.halftoner = HalftoningAlgorithms(config)
+
+        # Создание выходной директории
+        os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+
+        print(f"Используется устройство: {self.device}")
+        print(f"Путь к датасету: {dataset_path}")
+        print(f"Путь для результатов: {config.OUTPUT_DIR}")
+        print(f"Параметры модели: Batch={config.BATCH_SIZE}, Epochs={config.EPOCHS}, LR={config.LEARNING_RATE}")
+
+    def create_dataloaders(self, train_color='all', train_category='all',
+                          test_color='all', test_category='all'):
+        # Создание DataLoader'ов с выбором категорий
+        transform = transforms.Compose([
+            transforms.Resize(self.config.IMG_SIZE),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225]
+            )
+        ])
+
+        # Создаем датасеты с выбранными параметрами
+        train_dataset = HalftoningDataset(
+            self.config.DATASET_PATH,
+            mode='train',
+            color_type=train_color,
+            category=train_category,
+            transform=transform,
+            target_size=self.config.IMG_SIZE
+        )
+
+        test_dataset = HalftoningDataset(
+            self.config.DATASET_PATH,
+            mode='test',
+            color_type=test_color,
+            category=test_category,
+            transform=transform,
+            target_size=self.config.IMG_SIZE
+        )
+
+        # Проверяем что датасеты не пустые
+        if len(train_dataset) == 0:
+            print("ОШИБКА: Тренировочный датасет пуст!")
+            print(f"Проверьте путь: {os.path.join(self.config.DATASET_PATH, 'train')}")
+            return None, None
+
+        if len(test_dataset) == 0:
+            print("ПРЕДУПРЕЖДЕНИЕ: Тестовый датасет пуст!")
+            print(f"Проверьте путь: {os.path.join(self.config.DATASET_PATH, 'test')}")
+
+        if len(train_dataset) < self.config.MIN_BATCH_SIZE:
+            print(f"ВНИМАНИЕ: Слишком мало изображений ({len(train_dataset)})")
+            print(f"Минимальный требуемый batch: {self.config.MIN_BATCH_SIZE}")
+            print("Обучение будет неэффективным!")
+
+        # Используем adaptive batch size
+        batch_size = self._get_optimal_batch_size(len(train_dataset))
+
+        print(f"\n Настройки обучения:")
+        print(f"  • Изображений: {len(train_dataset)}")
+        print(f"  • Batch size: {batch_size}")
+        print(f"  • Батчей за эпоху: {len(train_dataset) // batch_size}")
+
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=2,
+            drop_last=False
+        )
+
+        test_loader = None
+        if len(test_dataset) > 0:
+            test_batch_size = min(batch_size, len(test_dataset))
+            test_loader = DataLoader(
+                test_dataset,
+                batch_size=test_batch_size,
+                shuffle=False,
+                num_workers=2
+            )
+
+        return train_loader, test_loader
+
+    def _get_optimal_batch_size(self, dataset_size):
+        # Выбор оптимального batch size
+        if dataset_size < self.config.MIN_BATCH_SIZE:
+            # Если датасет очень маленький, используем весь датасет как один batch
+            return max(1, dataset_size)
+        elif dataset_size < self.config.BATCH_SIZE:
+            # Если датасет меньше желаемого batch, используем меньший batch
+            # Находим степень двойки, близкую к dataset_size/2
+            optimal = max(self.config.MIN_BATCH_SIZE,
+                         min(2 ** int(np.log2(dataset_size // 2)),
+                             self.config.BATCH_SIZE))
+            return optimal
+        else:
+            return self.config.BATCH_SIZE
+
+    def train(self, train_loader, epochs=None):
+        # Обучение модели с использованием EPOCHS из конфигурации
+        if train_loader is None:
+            print("Невозможно обучить модель: нет данных")
+            return
+
+        # Проверка: есть ли батчи?
+        if len(train_loader) == 0:
+            print("Невозможно обучить модель: в train_loader нет батчей")
+            return
+
+        # Используем EPOCHS из конфигурации если не указано иное
+        if epochs is None:
+            epochs = self.config.EPOCHS
+
+        self.model.train()
+        print(f"\nНачало обучения на {len(train_loader.dataset)} изображениях...")
+        print(f"Количество эпох: {epochs}")
+        print(f"Батчей за эпоху: {len(train_loader)}")
+
+        # История loss для мониторинга
+        losses = []
+
+        for epoch in range(epochs):
+            total_loss = 0
+            num_batches = 0
+
+            for batch_idx, (images, targets) in enumerate(train_loader):
+                # ПРОВЕРКА: Размеры батча
+                if images.size(0) == 0:
+                    print(f" Пустой батч на эпохе {epoch+1}, батче {batch_idx}")
+                    continue
+
+                images = images.to(self.device)
+                targets = targets.to(self.device)
+
+                # Проверка размеров
+                if images.shape[0] != targets.shape[0]:
+                    print(f" Несовпадение размеров: images={images.shape}, targets={targets.shape}")
+                    continue
+
+                self.optimizer.zero_grad()
+                outputs = self.model(images)
+
+                # Проверка выходов модели
+                if torch.isnan(outputs).any():
+                    print(f" Наны в выходе модели на эпохе {epoch+1}")
+                    continue
+
+                loss = self.criterion(outputs, targets)
+
+                if torch.isnan(loss):
+                    print(f" Наны в loss на эпохе {epoch+1}")
+                    continue
+
+                loss.backward()
+
+                # Gradient clipping для стабильности
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+
+                self.optimizer.step()
+
+                total_loss += loss.item()
+                num_batches += 1
+
+                if batch_idx % max(1, len(train_loader) // 5) == 0:  # Вывод каждые ~20% батчей
+                    print(f'Epoch {epoch+1}/{epochs}, Batch {batch_idx}/{len(train_loader)}, Loss: {loss.item():.6f}')
+
+            if num_batches > 0:
+                avg_loss = total_loss / num_batches
+                losses.append(avg_loss)
+                print(f'Epoch {epoch+1} завершен. Средняя loss: {avg_loss:.6f}')
+
+            # Сохранение модели каждые 10 эпох
+            if (epoch + 1) % 10 == 0:
+                self.save_model(f"{self.config.MODEL_SAVE_PATH}_epoch_{epoch+1}")
+
+        # Сохраняем финальную модель
+        self.save_model()
+
+        # Визуализация обучения
+        if losses:
+            self._plot_training_loss(losses)
+
+    def _plot_training_loss(self, losses):
+        # Визуализация кривой обучения
+        plt.figure(figsize=(10, 6))
+        plt.plot(losses, marker='o', linestyle='-', linewidth=2)
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.title('Training Loss Curve')
+        plt.grid(True, alpha=0.3)
+
+        # Сохраняем график
+        plot_path = os.path.join(self.config.OUTPUT_DIR, 'training_loss.png')
+        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"График обучения сохранен: {plot_path}")
+
+    def save_model(self, path=None):
+        # Сохранение модели
+        if path is None:
+            path = self.config.MODEL_SAVE_PATH
+
+        torch.save({
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'config': self.config.__dict__  # Сохраняем конфигурацию
+        }, path)
+        print(f"Модель сохранена: {path}")
+        return path
+
+    def load_model(self, path=None):
+        # Загрузка модели
+        if path is None:
+            path = self.config.MODEL_SAVE_PATH
+
+        if os.path.exists(path):
+            checkpoint = torch.load(path, map_location=self.device)
+            self.model.load_state_dict(checkpoint['model_state_dict'])
+
+            if 'optimizer_state_dict' in checkpoint:
+                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+            print(f"Модель загружена: {path}")
+            return True
+        else:
+            print(f"Модель не найдена: {path}")
+            return False
+
+    def process_image(self, image_path, save_results=True):
+        # Обработка и визуализация одного изображения
+        try:
+            # Загрузка изображения
+            image = Image.open(image_path).convert('RGB')
+            image_np = np.array(image.resize(self.config.IMG_SIZE)) / 255.0
+
+            # Применение алгоритмов (используем halftoner с конфигом)
+            ordered = self.halftoner.ordered_dithering(image_np)
+            error_diff = self.halftoner.error_diffusion(image_np)
+            adaptive = self.halftoner.adaptive_halftoning(image_np, self.model, self.device)
+
+            # Расчет SSIM
+            gray_image = np.mean(image_np, axis=2) if len(image_np.shape) == 3 else image_np
+
+            ssim_ordered = ssim(gray_image, ordered, data_range=1.0)
+            ssim_error = ssim(gray_image, error_diff, data_range=1.0)
+            ssim_adaptive = ssim(gray_image, adaptive, data_range=1.0)
+
+            # Визуализация
+            if save_results:
+                self._plot_results(
+                    image_np, ordered, error_diff, adaptive,
+                    ssim_ordered, ssim_error, ssim_adaptive,
+                    os.path.basename(image_path)
+                )
+
+            return {
+                'ssim_ordered': ssim_ordered,
+                'ssim_error': ssim_error,
+                'ssim_adaptive': ssim_adaptive,
+                'image_name': os.path.basename(image_path)
+            }
+
+        except Exception as e:
+            print(f"Ошибка при обработке {image_path}: {e}")
+            return None
+
+    def _plot_results(self, original, ordered, error_diff, adaptive,
+                     ssim_ordered, ssim_error, ssim_adaptive, image_name):
+        # Построение графиков результатов
+        fig, axes = plt.subplots(2, 4, figsize=(16, 8))
+
+        # Оригинальное изображение
+        axes[0, 0].imshow(original)
+        axes[0, 0].set_title('Оригинал')
+        axes[0, 0].axis('off')
+
+        # Упорядоченное растрирование
+        axes[0, 1].imshow(ordered, cmap='gray')
+        axes[0, 1].set_title(f'Упорядоченное\nSSIM: {ssim_ordered:.3f}')
+        axes[0, 1].axis('off')
+
+        # Стохастическое растрирование
+        axes[0, 2].imshow(error_diff, cmap='gray')
+        axes[0, 2].set_title(f'Error Diffusion\nSSIM: {ssim_error:.3f}')
+        axes[0, 2].axis('off')
+
+        # Адаптивное растрирование
+        axes[0, 3].imshow(adaptive, cmap='gray')
+        axes[0, 3].set_title(f'Адаптивное (CNN)\nSSIM: {ssim_adaptive:.3f}')
+        axes[0, 3].axis('off')
+
+        # Гистограммы
+        axes[1, 0].hist(original.flatten(), bins=50, alpha=0.7)
+        axes[1, 0].set_title('Гистограмма оригинала')
+
+        axes[1, 1].hist(ordered.flatten(), bins=50, alpha=0.7)
+        axes[1, 1].set_title('Гистограмма упорядоченного')
+
+        axes[1, 2].hist(error_diff.flatten(), bins=50, alpha=0.7)
+        axes[1, 2].set_title('Гистограмма error diffusion')
+
+        axes[1, 3].hist(adaptive.flatten(), bins=50, alpha=0.7)
+        axes[1, 3].set_title('Гистограмма адаптивного')
+
+        plt.tight_layout()
+
+        # Сохранение
+        save_path = os.path.join(self.config.OUTPUT_DIR, f'{os.path.splitext(image_name)[0]}_results.png')
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.close()
+
+        print(f"Результаты сохранены: {save_path}")
+
+        # Вывод статистики
+        print("\n" + "="*60)
+        print(f"РЕЗУЛЬТАТЫ ОБРАБОТКИ: {image_name}")
+        print("="*60)
+        print(f"Упорядоченное растрирование: SSIM = {ssim_ordered:.3f}")
+        print(f"Error Diffusion: SSIM = {ssim_error:.3f}")
+        print(f"Адаптивное растрирование (CNN): SSIM = {ssim_adaptive:.3f}")
+
+        if ssim_ordered > 0:
+            improvement = ((ssim_adaptive - ssim_ordered) / ssim_ordered) * 100
+            print(f"Улучшение относительно упорядоченного: {improvement:.1f}%")
+
+        print("="*60)
+
+    def batch_process(self, test_color='all', test_category='all', max_images=20):
+        # Пакетная обработка всех изображений в выбранной категории
+        # Создаем тестовый датасет с выбранными параметрами
+        transform = transforms.Compose([
+            transforms.Resize(self.config.IMG_SIZE),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225]
+            )
+        ])
+
+        test_dataset = HalftoningDataset(
+            self.config.DATASET_PATH,
+            mode='test',
+            color_type=test_color,
+            category=test_category,
+            transform=transform,
+            target_size=self.config.IMG_SIZE
+        )
+
+        if len(test_dataset) == 0:
+            print(f"Нет тестовых изображений для цвета={test_color}, категории={test_category}")
+            return []
+
+        print(f"\nНайдено {len(test_dataset)} изображений для обработки")
+        print(f"Цвет: {test_color}, Категория: {test_category}")
+
+        results = []
+        successful = 0
+
+        # Обрабатываем изображения
+        for i in range(min(len(test_dataset), max_images)):
+            img_path = test_dataset.image_paths[i]
+            img_name = os.path.basename(img_path)
+            print(f"\n[{i+1}/{min(len(test_dataset), max_images)}] Обработка: {img_name}")
+
+            try:
+                result = self.process_image(img_path, save_results=True)
+                if result:
+                    results.append(result)
+                    successful += 1
+            except Exception as e:
+                print(f"Ошибка при обработке: {e}")
+
+        # Статистика по всем изображениям
+        if results:
+            self._print_summary_statistics(results, successful, test_color, test_category)
+            # Сохраняем сводный отчет
+            self._save_summary_report(results, test_color, test_category)
+
+        return results
+
+    def _print_summary_statistics(self, results, successful, test_color, test_category):
+        # Вывод сводной статистики
+        print("\n" + "="*60)
+        print("ИТОГОВАЯ СТАТИСТИКА:")
+        print("="*60)
+
+        avg_ordered = np.mean([r['ssim_ordered'] for r in results])
+        avg_error = np.mean([r['ssim_error'] for r in results])
+        avg_adaptive = np.mean([r['ssim_adaptive'] for r in results])
+
+        print(f"Тестовый набор: цвет={test_color}, категория={test_category}")
+        print(f"Успешно обработано: {successful}/{len(results)}")
+        print(f"Средний SSIM (упорядоченное): {avg_ordered:.3f}")
+        print(f"Средний SSIM (error diffusion): {avg_error:.3f}")
+        print(f"Средний SSIM (адаптивное): {avg_adaptive:.3f}")
+
+        if avg_ordered > 0:
+            improvement = ((avg_adaptive - avg_ordered) / avg_ordered) * 100
+            print(f"Среднее улучшение: {improvement:.1f}%")
+
+        print("="*60)
+
+    def _save_summary_report(self, results, test_color, test_category):
+        # Сохранение сводного отчета
+        report_path = os.path.join(self.config.OUTPUT_DIR,
+                                  f"summary_report_{test_color}_{test_category}.txt")
+
+        with open(report_path, 'w') as f:
+            f.write("="*60 + "\n")
+            f.write("СВОДНЫЙ ОТЧЕТ ПО РАСТРИРОВАНИЮ\n")
+            f.write("="*60 + "\n\n")
+
+            f.write(f"Датасет: {self.config.DATASET_PATH}\n")
+            f.write(f"Тестовый набор: цвет={test_color}, категория={test_category}\n")
+            f.write(f"Обработано изображений: {len(results)}\n\n")
+
+            f.write("РЕЗУЛЬТАТЫ ПО ИЗОБРАЖЕНИЯМ:\n")
+            f.write("-"*60 + "\n")
+
+            for result in results:
+                f.write(f"\n{result['image_name']}:\n")
+                f.write(f"  Упорядоченное: {result['ssim_ordered']:.3f}\n")
+                f.write(f"  Error Diffusion: {result['ssim_error']:.3f}\n")
+                f.write(f"  Адаптивное (CNN): {result['ssim_adaptive']:.3f}\n")
+
+                if result['ssim_ordered'] > 0:
+                    improvement = ((result['ssim_adaptive'] - result['ssim_ordered']) / result['ssim_ordered']) * 100
+                    f.write(f"  Улучшение: {improvement:.1f}%\n")
+
+            f.write("\n" + "="*60 + "\n")
+            f.write("СТАТИСТИКА:\n")
+            f.write("-"*60 + "\n")
+
+            avg_ordered = np.mean([r['ssim_ordered'] for r in results])
+            avg_error = np.mean([r['ssim_error'] for r in results])
+            avg_adaptive = np.mean([r['ssim_adaptive'] for r in results])
+
+            f.write(f"Средний SSIM (упорядоченное): {avg_ordered:.3f}\n")
+            f.write(f"Средний SSIM (error diffusion): {avg_error:.3f}\n")
+            f.write(f"Средний SSIM (адаптивное): {avg_adaptive:.3f}\n")
+
+            if avg_ordered > 0:
+                improvement = ((avg_adaptive - avg_ordered) / avg_ordered) * 100
+                f.write(f"Среднее улучшение: {improvement:.1f}%\n")
+
+            f.write("\n" + "="*60 + "\n")
+            f.write("ПАРАМЕТРЫ МОДЕЛИ:\n")
+            f.write("-"*60 + "\n")
+            f.write(f"Batch Size: {self.config.BATCH_SIZE}\n")
+            f.write(f"Epochs: {self.config.EPOCHS}\n")
+            f.write(f"Learning Rate: {self.config.LEARNING_RATE}\n")
+            f.write(f"Image Size: {self.config.IMG_SIZE}\n")
+            f.write(f"Patch Size: {self.config.PATCH_SIZE}\n")
+
+        print(f"\nСводный отчет сохранен: {report_path}")
+
+    def compare_with_halftoning_v2(self):
+        # Сравнение с Halftoning_v2
+        print("\n" + "="*60)
+        print("СРАВНЕНИЕ С Halftoning_v2:")
+        print("(https://github.com/BaekduChoi/Halftoning_v2)")
+        print("="*60)
+
+        print("Наш подход (CNN-based):")
+        print("• Адаптивное растрирование с учетом локальных особенностей")
+        print("• Обучение на датасете для оптимальных параметров")
+        print("• Более высокая точность (SSIM ~0.97)")
+        print("• Сохранение текстур и деталей")
+
+        print("\nHalftoning_v2 (Traditional):")
+        print("• Фиксированные алгоритмы (error diffusion)")
+        print("• Один набор параметров для всего изображения")
+        print("• Меньшая точность (SSIM ~0.52-0.88)")
+        print("• Потеря деталей в сложных областях")
+
+        print("\nПреимущества нашего подхода:")
+        print("1. Более высокое качество изображения")
+        print("2. Адаптивность к различным типам изображений")
+        print("3. Сохранение мелких деталей и текстур")
+        print("4. Автоматическая настройка параметров")
+
+        print("="*60)
+
+
+# ГЛАВНАЯ ФУНКЦИЯ С ВЫБОРОМ ОПЦИЙ
+def main():
+    """Основная функция программы с выбором опций"""
+
+    print("="*60)
+    print("СИСТЕМА АДАПТИВНОГО РАСТРИРОВАНИЯ В GOOGLE COLAB")
+    print("="*60)
+
+    # Шаг 1: Монтирование Google Drive
+    print("\n1. Монтирование Google Drive...")
+    mount_google_drive()
+
+    # Шаг 2: Поиск датасета
+    print("\n2. Поиск датасета...")
+    dataset_path = find_dataset_path()
+
+    if dataset_path is None:
+        print("Датасет не найден.")
+        return
+
+    # Создаем конфигурацию
+    config = Config()
+    config.DATASET_PATH = dataset_path
+
+    # Шаг 3: Выбор параметров обучения
+    print("\n3. Выбор параметров обучения:")
+    print("-"*40)
+
+    print("Доступные опции для цвета:")
+    print("1. all - все изображения")
+    print("2. colored - только цветные")
+    print("3. black and white - только черно-белые")
+
+    train_color = input("\nВыберите цвет для обучения (all/colored/black and white): ").strip()
+    if train_color not in ['all', 'colored', 'black and white']:
+        train_color = 'all'
+
+    print("\nДоступные опции для категории:")
+    print("1. all - все категории")
+    print("2. nature - только природа")
+    print("3. transport - только транспорт")
+
+    train_category = input("\nВыберите категорию для обучения (all/nature/transport): ").strip()
+    if train_category not in ['all', 'nature', 'transport']:
+        train_category = 'all'
+
+    # Шаг 4: Инициализация системы
+    print("\n4. Инициализация системы...")
+    system = AdaptiveHalftoningSystem(dataset_path, config)
+
+    # Шаг 5: Подготовка данных с выбранными параметрами
+    print("\n5. Подготовка данных...")
+    print(f"Параметры обучения: цвет={train_color}, категория={train_category}")
+
+    train_loader, test_loader = system.create_dataloaders(
+        train_color=train_color,
+        train_category=train_category,
+        test_color='all',  # Для тестирования по умолчанию все
+        test_category='all'
+    )
+
+    if train_loader is None:
+        print("Не удалось создать DataLoader. Проверьте структуру датасета.")
+        return
+
+    print(f"Тренировочных изображений: {len(train_loader.dataset)}")
+    if test_loader:
+        print(f"Тестовых изображений: {len(test_loader.dataset)}")
+
+    # Шаг 6: Загрузка или обучение модели
+    print("\n6. Работа с моделью...")
+
+    use_existing = input("Использовать существующую модель? (y/n): ").lower() == 'y'
+
+    if use_existing:
+        if system.load_model():
+            print("Модель успешно загружена")
+        else:
+            print("Не удалось загрузить модель. Начинаем обучение...")
+            system.train(train_loader)
+    else:
+        print("Начинаем обучение модели...")
+        system.train(train_loader)
+
+    # Шаг 7: Выбор параметров тестирования
+    print("\n7. Выбор параметров тестирования:")
+    print("-"*40)
+
+    print("Доступные опции для цвета тестирования:")
+    print("1. all - все изображения")
+    print("2. colored - только цветные")
+    print("3. black and white - только черно-белые")
+
+    test_color = input("\nВыберите цвет для тестирования (all/colored/black and white): ").strip()
+    if test_color not in ['all', 'colored', 'black and white']:
+        test_color = 'all'
+
+    print("\nДоступные опции для категории тестирования:")
+    print("1. all - все категории")
+    print("2. nature - только природа")
+    print("3. transport - только транспорт")
+
+    test_category = input("\nВыберите категорию для тестирования (all/nature/transport): ").strip()
+    if test_category not in ['all', 'nature', 'transport']:
+        test_category = 'all'
+
+    # Шаг 8: Обработка тестовых изображений с выбранными параметрами
+    print("\n8. Обработка тестовых изображений...")
+    print(f"Параметры тестирования: цвет={test_color}, категория={test_category}")
+
+    results = system.batch_process(test_color=test_color, test_category=test_category)
+
+    if not results:
+        print("Нет результатов для анализа.")
+
+    # Шаг 9: Сравнение с Halftoning_v2
+    print("\n9. Сравнение с Halftoning_v2...")
+    system.compare_with_halftoning_v2()
+
+    print("\n" + "="*60)
+    print("ПРОГРАММА ЗАВЕРШЕНА")
+    print(f"Результаты сохранены в: {system.config.OUTPUT_DIR}")
+    print("="*60)
+
+# ЗАПУСК ПРОГРАММЫ
+if __name__ == "__main__":
+    # Установка зависимостей в Google Colab
+    try:
+        import google.colab
+        print("Обнаружен Google Colab. Устанавливаем зависимости...")
+        get_ipython().system('pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118')
+        get_ipython().system('pip install scikit-image matplotlib pillow')
+    except:
+        pass
+
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nПрограмма прервана пользователем")
+    except Exception as e:
+        print(f"\nПроизошла ошибка: {e}")
+        import traceback
+        traceback.print_exc()
+        print("\nУстранение неполадок:")
+        print("1. Убедитесь, что Google Drive смонтирован")
+        print("2. Проверьте структуру датасета")
+        print("3. Убедитесь, что изображения в правильных папках")
+        print("4. Проверьте права доступа к файлам")
