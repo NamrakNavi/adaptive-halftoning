@@ -10,8 +10,7 @@ from config import Config
 from system.AdaptiveHalftoningSystem import AdaptiveHalftoningSystem
 from utils.file_utils import (
     find_dataset_windows, 
-    check_dataset_structure, 
-    suggest_dataset_folders,
+    check_dataset_structure,
     create_dataset_structure,
     normalize_windows_path
 )
