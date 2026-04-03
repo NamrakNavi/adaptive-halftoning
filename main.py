@@ -143,7 +143,7 @@ def main():
             dataset_path = find_dataset_windows(config)
             
             if dataset_path is None:
-                print("✗ Датасет не найден. Обучение невозможно.")
+                print("Датасет не найден. Обучение невозможно.")
                 continue
             
             config.update_dataset_path(dataset_path)
@@ -185,7 +185,7 @@ def main():
                 else:
                     system.save_model()
             else:
-                print("✗ Не удалось создать DataLoader. Проверьте датасет.")
+                print("Не удалось создать DataLoader. Проверьте датасет.")
         
         elif choice == '2':
             # Обработка одного изображения
@@ -198,7 +198,7 @@ def main():
             image_path = normalize_windows_path(image_path)
             
             if not os.path.exists(image_path):
-                print(f"✗ Файл не найден: {image_path}")
+                print(f"Файл не найден: {image_path}")
                 continue
             
             # Инициализация системы, если нужно
