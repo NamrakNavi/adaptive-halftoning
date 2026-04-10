@@ -21,7 +21,7 @@ class AdaptiveHalftoningSystem:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         # Инициализация модели
-        self.model = UNet(in_channels=3, out_channels=1).to(self.device)
+        self.model = UNet(in_channels=3, out_channels=1, use_sigmoid=False).to(self.device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=config.LEARNING_RATE)
         self.criterion = nn.MSELoss()
 

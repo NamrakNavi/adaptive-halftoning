@@ -116,4 +116,11 @@ class HalftoningAlgorithms:
                 patch_output = (patch > threshold).astype(float)
                 output[i:i_end, j:j_end] = patch_output
 
+                    # Применяем Gaussian blur для сглаживания
+        from scipy.ndimage import gaussian_filter
+        output = gaussian_filter(output, sigma=0.5)
+    
+        # Или билатеральный фильтр (сохраняет границы)
+        from scipy.ndimage import uniform_filter
+        output = uniform_filter(output, size=3)
         return output
