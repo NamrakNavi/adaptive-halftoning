@@ -6,7 +6,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 
-from models.unet import unet
+from models.unet import UNet
 from algorithms.halftoning_algorithms import HalftoningAlgorithms
 from data.dataset import HalftoningDataset
 from utils.visualization import plot_results, plot_training_loss
@@ -21,7 +21,7 @@ class AdaptiveHalftoningSystem:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         # Инициализация модели
-        self.model = unet(in_channels=3, out_channels=1).to(self.device)
+        self.model = UNet(in_channels=3, out_channels=1).to(self.device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=config.LEARNING_RATE)
         self.criterion = nn.MSELoss()
 
