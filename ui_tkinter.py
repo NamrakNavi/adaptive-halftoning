@@ -1,152 +1,365 @@
 import os
 import sys
 import threading
-import warnings
-warnings.filterwarnings('ignore')
+import traceback
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
-from PIL import Image, ImageTk
-
 from config import Config
 from system.AdaptiveHalftoningSystem import AdaptiveHalftoningSystem
-from utils.file_utils import find_dataset_windows, normalize_windows_path
+from utils.file_utils import (
+    find_dataset_windows,
+    normalize_windows_path,
+    create_dataset_structure,
+    check_dataset_structure,
+)
+
+
+class TkTextRedirector:
+    def __init__(self, widget):
+        self.widget = widget
+
+    def write(self, text):
+        if not text:
+            return
+        self.widget.after(0, self._append, text)
+
+    def flush(self):
+        pass
+
+    def _append(self, text):
+        self.widget.insert(tk.END, text)
+        self.widget.see(tk.END)
 
 
 class AdaptiveHalftoningUI:
     def __init__(self, root):
         self.root = root
-        self.root.title('Adaptive Halftoning Studio')
-        self.root.geometry('1280x860')
-        self.root.minsize(1100, 760)
+        self.root.title('Система адаптивного растрирования')
+        self.root.geometry('1100x760')
+        self.root.minsize(980, 680)
 
         self.config = Config()
-        dataset_path = find_dataset_windows(self.config) or self.config.DATASET_PATH
-        self.system = AdaptiveHalftoningSystem(dataset_path, self.config)
+        self.system = None
+        self.current_model_path = self.config.MODEL_SAVE_PATH
+        self.current_image_path = ''
 
-        self.image_path = tk.StringVar()
-        self.model_path = tk.StringVar(value=self.config.MODEL_SAVE_PATH)
-        self.dataset_path = tk.StringVar(value=dataset_path)
-        self.status_var = tk.StringVar(value='Готово к работе')
-        self.metrics_var = tk.StringVar(value='Метрики пока отсутствуют')
-        self.tk_preview = None
-
+        self._build_styles()
         self._build_ui()
+        self._init_defaults()
+        self._redirect_stdout()
+
+    def _build_styles(self):
+        style = ttk.Style()
+        try:
+            style.theme_use('clam')
+        except Exception:
+            pass
 
     def _build_ui(self):
         main = ttk.Frame(self.root, padding=12)
-        main.pack(fill='both', expand=True)
+        main.pack(fill=tk.BOTH, expand=True)
 
-        top = ttk.LabelFrame(main, text='Параметры', padding=12)
-        top.pack(fill='x', pady=(0, 10))
+        top = ttk.LabelFrame(main, text='Пути и общие параметры', padding=10)
+        top.pack(fill=tk.X, pady=(0, 10))
 
-        ttk.Label(top, text='Изображение:').grid(row=0, column=0, sticky='w')
-        ttk.Entry(top, textvariable=self.image_path, width=100).grid(row=0, column=1, sticky='ew', padx=8)
-        ttk.Button(top, text='Открыть', command=self.select_image).grid(row=0, column=2)
+        self.dataset_var = tk.StringVar()
+        self.output_var = tk.StringVar()
+        self.model_var = tk.StringVar()
+        self.image_var = tk.StringVar()
+        self.epochs_var = tk.StringVar()
+        self.batch_var = tk.StringVar()
+        self.lr_var = tk.StringVar()
+        self.img_w_var = tk.StringVar()
+        self.img_h_var = tk.StringVar()
+        self.max_images_var = tk.StringVar(value='20')
 
-        ttk.Label(top, text='Модель:').grid(row=1, column=0, sticky='w', pady=(8, 0))
-        ttk.Entry(top, textvariable=self.model_path, width=100).grid(row=1, column=1, sticky='ew', padx=8, pady=(8, 0))
-        ttk.Button(top, text='Выбрать', command=self.select_model).grid(row=1, column=2, pady=(8, 0))
+        self.train_color_var = tk.StringVar(value='all')
+        self.train_category_var = tk.StringVar(value='all')
+        self.test_color_var = tk.StringVar(value='all')
+        self.test_category_var = tk.StringVar(value='all')
 
-        ttk.Label(top, text='Датасет:').grid(row=2, column=0, sticky='w', pady=(8, 0))
-        ttk.Entry(top, textvariable=self.dataset_path, width=100).grid(row=2, column=1, sticky='ew', padx=8, pady=(8, 0))
-        ttk.Button(top, text='Выбрать', command=self.select_dataset).grid(row=2, column=2, pady=(8, 0))
+        self._path_row(top, 0, 'Датасет:', self.dataset_var, self.choose_dataset)
+        self._path_row(top, 1, 'Результаты:', self.output_var, self.choose_output_dir)
+        self._path_row(top, 2, 'Модель:', self.model_var, self.choose_model_file)
+        self._path_row(top, 3, 'Изображение:', self.image_var, self.choose_image)
 
-        btns = ttk.Frame(top)
-        btns.grid(row=3, column=0, columnspan=3, sticky='ew', pady=(12, 0))
-        ttk.Button(btns, text='Загрузить модель', command=self.load_model).pack(side='left')
-        ttk.Button(btns, text='Обработать изображение', command=self.process_image).pack(side='left', padx=8)
+        params = ttk.Frame(top)
+        params.grid(row=4, column=0, columnspan=3, sticky='ew', pady=(10, 0))
+        for i in range(8):
+            params.columnconfigure(i, weight=1)
 
-        top.columnconfigure(1, weight=1)
+        ttk.Label(params, text='Epochs').grid(row=0, column=0, sticky='w', padx=4, pady=4)
+        ttk.Entry(params, textvariable=self.epochs_var, width=10).grid(row=0, column=1, sticky='ew', padx=4, pady=4)
+        ttk.Label(params, text='Batch Size').grid(row=0, column=2, sticky='w', padx=4, pady=4)
+        ttk.Entry(params, textvariable=self.batch_var, width=10).grid(row=0, column=3, sticky='ew', padx=4, pady=4)
+        ttk.Label(params, text='Learning Rate').grid(row=0, column=4, sticky='w', padx=4, pady=4)
+        ttk.Entry(params, textvariable=self.lr_var, width=12).grid(row=0, column=5, sticky='ew', padx=4, pady=4)
+        ttk.Label(params, text='Макс. изображений').grid(row=0, column=6, sticky='w', padx=4, pady=4)
+        ttk.Entry(params, textvariable=self.max_images_var, width=10).grid(row=0, column=7, sticky='ew', padx=4, pady=4)
 
-        center = ttk.Panedwindow(main, orient='vertical')
-        center.pack(fill='both', expand=True)
+        ttk.Label(params, text='Ширина').grid(row=1, column=0, sticky='w', padx=4, pady=4)
+        ttk.Entry(params, textvariable=self.img_w_var, width=10).grid(row=1, column=1, sticky='ew', padx=4, pady=4)
+        ttk.Label(params, text='Высота').grid(row=1, column=2, sticky='w', padx=4, pady=4)
+        ttk.Entry(params, textvariable=self.img_h_var, width=10).grid(row=1, column=3, sticky='ew', padx=4, pady=4)
 
-        preview_box = ttk.Labelframe(center, text='Результат', padding=10)
-        info_box = ttk.Labelframe(center, text='Информация', padding=10)
-        center.add(preview_box, weight=5)
-        center.add(info_box, weight=1)
+        filters = ttk.LabelFrame(main, text='Фильтры датасета', padding=10)
+        filters.pack(fill=tk.X, pady=(0, 10))
+        for i in range(8):
+            filters.columnconfigure(i, weight=1)
 
-        self.preview_label = ttk.Label(preview_box, text='После обработки здесь появится итоговая картинка', anchor='center')
-        self.preview_label.pack(fill='both', expand=True)
+        color_values = ['all', 'colored', 'black and white']
+        category_values = ['all', 'nature', 'transport']
 
-        ttk.Label(info_box, textvariable=self.metrics_var, justify='left').pack(anchor='w')
-        ttk.Label(info_box, textvariable=self.status_var, justify='left').pack(anchor='w', pady=(8, 0))
+        ttk.Label(filters, text='Train color').grid(row=0, column=0, sticky='w', padx=4, pady=4)
+        ttk.Combobox(filters, textvariable=self.train_color_var, values=color_values, state='readonly').grid(row=0, column=1, sticky='ew', padx=4, pady=4)
+        ttk.Label(filters, text='Train category').grid(row=0, column=2, sticky='w', padx=4, pady=4)
+        ttk.Combobox(filters, textvariable=self.train_category_var, values=category_values, state='readonly').grid(row=0, column=3, sticky='ew', padx=4, pady=4)
+        ttk.Label(filters, text='Test color').grid(row=0, column=4, sticky='w', padx=4, pady=4)
+        ttk.Combobox(filters, textvariable=self.test_color_var, values=color_values, state='readonly').grid(row=0, column=5, sticky='ew', padx=4, pady=4)
+        ttk.Label(filters, text='Test category').grid(row=0, column=6, sticky='w', padx=4, pady=4)
+        ttk.Combobox(filters, textvariable=self.test_category_var, values=category_values, state='readonly').grid(row=0, column=7, sticky='ew', padx=4, pady=4)
 
-    def select_image(self):
-        path = filedialog.askopenfilename(title='Выберите изображение', filetypes=[('Images', '*.png *.jpg *.jpeg *.bmp *.tif *.tiff')])
-        if path:
-            self.image_path.set(normalize_windows_path(path))
+        actions = ttk.LabelFrame(main, text='Действия', padding=10)
+        actions.pack(fill=tk.X, pady=(0, 10))
 
-    def select_model(self):
-        path = filedialog.askopenfilename(title='Выберите модель', filetypes=[('PyTorch model', '*.pth'), ('All files', '*.*')])
-        if path:
-            self.model_path.set(normalize_windows_path(path))
+        btns = [
+            ('Найти датасет', self.auto_find_dataset),
+            ('Проверить датасет', self.check_dataset),
+            ('Создать структуру датасета', self.create_dataset),
+            ('Инициализировать систему', self.init_system),
+            ('Обучить модель', self.train_model),
+            ('Загрузить модель', self.load_model),
+            ('Обработать изображение', self.process_image),
+            ('Пакетная обработка', self.batch_process),
+            ('Очистить лог', self.clear_log),
+        ]
 
-    def select_dataset(self):
+        for idx, (text, cmd) in enumerate(btns):
+            ttk.Button(actions, text=text, command=cmd).grid(row=idx // 3, column=idx % 3, sticky='ew', padx=6, pady=6)
+        for i in range(3):
+            actions.columnconfigure(i, weight=1)
+
+        log_frame = ttk.LabelFrame(main, text='Лог работы', padding=8)
+        log_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.log_widget = tk.Text(log_frame, wrap='word', height=22)
+        self.log_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll = ttk.Scrollbar(log_frame, orient='vertical', command=self.log_widget.yview)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.log_widget.configure(yscrollcommand=scroll.set)
+
+        status_frame = ttk.Frame(main)
+        status_frame.pack(fill=tk.X, pady=(8, 0))
+        self.status_var = tk.StringVar(value='Готово')
+        ttk.Label(status_frame, textvariable=self.status_var).pack(side=tk.LEFT)
+
+    def _path_row(self, parent, row, label, var, command):
+        parent.columnconfigure(1, weight=1)
+        ttk.Label(parent, text=label).grid(row=row, column=0, sticky='w', padx=4, pady=4)
+        ttk.Entry(parent, textvariable=var).grid(row=row, column=1, sticky='ew', padx=4, pady=4)
+        ttk.Button(parent, text='Обзор', command=command).grid(row=row, column=2, sticky='ew', padx=4, pady=4)
+
+    def _init_defaults(self):
+        self.dataset_var.set(self.config.DATASET_PATH)
+        self.output_var.set(self.config.OUTPUT_DIR)
+        self.model_var.set(self.config.MODEL_SAVE_PATH)
+        self.epochs_var.set(str(self.config.EPOCHS))
+        self.batch_var.set(str(self.config.BATCH_SIZE))
+        self.lr_var.set(str(self.config.LEARNING_RATE))
+        self.img_w_var.set(str(self.config.IMG_SIZE[0]))
+        self.img_h_var.set(str(self.config.IMG_SIZE[1]))
+
+    def _redirect_stdout(self):
+        redirector = TkTextRedirector(self.log_widget)
+        sys.stdout = redirector
+        sys.stderr = redirector
+
+    def set_status(self, text):
+        self.status_var.set(text)
+        self.root.update_idletasks()
+
+    def log(self, text):
+        self.log_widget.insert(tk.END, text + ' ')
+        self.log_widget.see(tk.END)
+
+    def clear_log(self):
+        self.log_widget.delete('1.0', tk.END)
+
+    def choose_dataset(self):
         path = filedialog.askdirectory(title='Выберите папку датасета')
         if path:
-            self.dataset_path.set(normalize_windows_path(path))
-            self.config.update_dataset_path(self.dataset_path.get())
-            self.system = AdaptiveHalftoningSystem(self.dataset_path.get(), self.config)
+            self.dataset_var.set(normalize_windows_path(path))
+
+    def choose_output_dir(self):
+        path = filedialog.askdirectory(title='Выберите папку результатов')
+        if path:
+            self.output_var.set(normalize_windows_path(path))
+
+    def choose_model_file(self):
+        path = filedialog.askopenfilename(
+            title='Выберите файл модели',
+            filetypes=[('PyTorch model', '*.pth'), ('All files', '*.*')]
+        )
+        if path:
+            self.model_var.set(normalize_windows_path(path))
+
+    def choose_image(self):
+        path = filedialog.askopenfilename(
+            title='Выберите изображение',
+            filetypes=[('Images', '*.png;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff'), ('All files', '*.*')]
+        )
+        if path:
+            self.image_var.set(normalize_windows_path(path))
+
+    def sync_config_from_ui(self):
+        self.config.DATASET_PATH = normalize_windows_path(self.dataset_var.get().strip())
+        self.config.OUTPUT_DIR = normalize_windows_path(self.output_var.get().strip())
+        self.config.MODEL_SAVE_PATH = normalize_windows_path(self.model_var.get().strip())
+        self.config.MODELS_DIR = os.path.dirname(self.config.MODEL_SAVE_PATH)
+        self.config.EPOCHS = int(self.epochs_var.get().strip())
+        self.config.BATCH_SIZE = int(self.batch_var.get().strip())
+        self.config.LEARNING_RATE = float(self.lr_var.get().strip())
+        self.config.IMG_SIZE = (int(self.img_w_var.get().strip()), int(self.img_h_var.get().strip()))
+        os.makedirs(self.config.OUTPUT_DIR, exist_ok=True)
+        os.makedirs(self.config.MODELS_DIR, exist_ok=True)
+
+    def ensure_system(self):
+        self.sync_config_from_ui()
+        if self.system is None:
+            self.system = AdaptiveHalftoningSystem(self.config.DATASET_PATH, self.config)
+        return self.system
+
+    def run_in_thread(self, target):
+        thread = threading.Thread(target=self._safe_run, args=(target,), daemon=True)
+        thread.start()
+
+    def _safe_run(self, target):
+        try:
+            target()
+            self.set_status('Готово')
+        except Exception as e:
+            self.set_status('Ошибка')
+            traceback.print_exc()
+            messagebox.showerror('Ошибка', str(e))
+
+    def auto_find_dataset(self):
+        def task():
+            self.set_status('Поиск датасета...')
+            path = find_dataset_windows(self.config)
+            if path:
+                self.dataset_var.set(normalize_windows_path(path))
+                print(f'Найден датасет: {path}')
+            else:
+                print('Датасет не найден автоматически.')
+        self.run_in_thread(task)
+
+    def check_dataset(self):
+        def task():
+            self.set_status('Проверка датасета...')
+            self.sync_config_from_ui()
+            dataset_path = self.config.DATASET_PATH
+            if not os.path.exists(dataset_path):
+                print(f'Путь не существует: {dataset_path}')
+                return
+            structure_ok, stats = check_dataset_structure(dataset_path)
+            print(f'Структура датасета корректна: {structure_ok}')
+            print('Статистика:')
+            print(stats)
+        self.run_in_thread(task)
+
+    def create_dataset(self):
+        def task():
+            self.set_status('Создание структуры датасета...')
+            self.sync_config_from_ui()
+            ok = create_dataset_structure(self.config.DATASET_PATH)
+            if ok:
+                print(f'Структура датасета создана: {self.config.DATASET_PATH}')
+        self.run_in_thread(task)
+
+    def init_system(self):
+        def task():
+            self.set_status('Инициализация системы...')
+            self.system = None
+            self.ensure_system()
+            print('Система инициализирована.')
+        self.run_in_thread(task)
+
+    def train_model(self):
+        def task():
+            self.set_status('Обучение модели...')
+            system = self.ensure_system()
+            train_loader, _ = system.create_dataloaders(
+                train_color=self.train_color_var.get(),
+                train_category=self.train_category_var.get(),
+                test_color=self.test_color_var.get(),
+                test_category=self.test_category_var.get(),
+            )
+            if train_loader is None or len(train_loader) == 0:
+                print('Не удалось создать train_loader. Обучение отменено.')
+                return
+            system.train(train_loader, epochs=self.config.EPOCHS)
+            system.save_model(self.config.MODEL_SAVE_PATH)
+            self.model_var.set(self.config.MODEL_SAVE_PATH)
+            print(f'Обучение завершено. Модель сохранена: {self.config.MODEL_SAVE_PATH}')
+        self.run_in_thread(task)
 
     def load_model(self):
-        path = self.model_path.get().strip()
-        if not path or not os.path.exists(path):
-            messagebox.showerror('Ошибка', 'Файл модели не найден')
-            return
-        ok = self.system.load_model(path)
-        self.status_var.set('Модель загружена' if ok else 'Не удалось загрузить модель')
+        def task():
+            self.set_status('Загрузка модели...')
+            system = self.ensure_system()
+            model_path = normalize_windows_path(self.model_var.get().strip())
+            if not model_path or not os.path.exists(model_path):
+                print(f'Файл модели не найден: {model_path}')
+                return
+            ok = system.load_model(model_path)
+            if ok:
+                print('Модель успешно загружена.')
+        self.run_in_thread(task)
 
     def process_image(self):
-        image_path = self.image_path.get().strip()
-        if not image_path or not os.path.exists(image_path):
-            messagebox.showerror('Ошибка', 'Выберите корректное изображение')
-            return
-        self.status_var.set('Обработка...')
-        threading.Thread(target=self._worker, args=(image_path,), daemon=True).start()
-
-    def _worker(self, image_path):
-        try:
-            model_path = self.model_path.get().strip()
-            if model_path and os.path.exists(model_path):
-                self.system.load_model(model_path)
-            result = self.system.process_image(image_path, save_results=True)
-            if result is None:
-                self.root.after(0, lambda: self.status_var.set('Ошибка обработки'))
+        def task():
+            self.set_status('Обработка изображения...')
+            system = self.ensure_system()
+            image_path = normalize_windows_path(self.image_var.get().strip())
+            if not image_path or not os.path.exists(image_path):
+                print(f'Файл изображения не найден: {image_path}')
                 return
+            model_path = normalize_windows_path(self.model_var.get().strip())
+            if model_path and os.path.exists(model_path):
+                system.load_model(model_path)
+            result = system.process_image(image_path, save_results=True)
+            if result:
+                print('Результаты обработки:')
+                print(f"Упорядоченное: SSIM = {result.get('ssim_ordered', 0):.4f}")
+                print(f"Error Diffusion: SSIM = {result.get('ssim_error', 0):.4f}")
+                print(f"Адаптивное: SSIM = {result.get('ssim_adaptive', 0):.4f}")
+                if 'ssim_adaptive_preview' in result:
+                    print(f"Адаптивное preview: SSIM = {result.get('ssim_adaptive_preview', 0):.4f}")
+        self.run_in_thread(task)
 
-            result_path = os.path.join(self.config.OUTPUT_DIR, f"{os.path.splitext(os.path.basename(image_path))[0]}_results.png")
-            if os.path.exists(result_path):
-                img = Image.open(result_path)
-                img.thumbnail((1180, 620))
-                self.tk_preview = ImageTk.PhotoImage(img)
-                self.root.after(0, lambda: self.preview_label.configure(image=self.tk_preview, text=''))
-
-            metrics_text = (
-                f"SSIM ordered: {result['ssim_ordered']:.4f}
-"
-                f"SSIM error diffusion: {result['ssim_error']:.4f}
-"
-                f"SSIM adaptive: {result['ssim_adaptive']:.4f}
-"
-                f"SSIM stable preview: {result['ssim_adaptive_preview']:.4f}"
+    def batch_process(self):
+        def task():
+            self.set_status('Пакетная обработка...')
+            system = self.ensure_system()
+            model_path = normalize_windows_path(self.model_var.get().strip())
+            if model_path and os.path.exists(model_path):
+                system.load_model(model_path)
+            max_images = int(self.max_images_var.get().strip())
+            results = system.batch_process(
+                test_color=self.test_color_var.get(),
+                test_category=self.test_category_var.get(),
+                max_images=max_images,
             )
-            self.root.after(0, lambda: self.metrics_var.set(metrics_text))
-            self.root.after(0, lambda: self.status_var.set('Готово'))
-        except Exception as e:
-            self.root.after(0, lambda: self.status_var.set(f'Ошибка: {e}'))
+            print(f'Пакетная обработка завершена. Обработано: {len(results)}')
+        self.run_in_thread(task)
 
 
 def main():
     root = tk.Tk()
-    try:
-        ttk.Style().theme_use('vista')
-    except Exception:
-        pass
-    AdaptiveHalftoningUI(root)
+    app = AdaptiveHalftoningUI(root)
     root.mainloop()
 
 
