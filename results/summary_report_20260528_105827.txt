@@ -1,0 +1,169 @@
+============================================================
+СВОДНЫЙ ОТЧЕТ ПО РАСТРИРОВАНИЮ
+============================================================
+
+Датасет: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\halftoning_dataset
+Обработано изображений: 20
+
+РЕЗУЛЬТАТЫ ПО ИЗОБРАЖЕНИЯМ:
+------------------------------------------------------------
+
+City_Cl (1).jpg:
+  Упорядоченное: 0.123
+  Error Diffusion: 0.174
+  DBS Screen: 0.141
+  Differentiable: 0.232
+  Адаптивное: 0.247
+  Preview: 0.499
+
+City_Cl (10).jpg:
+  Упорядоченное: 0.051
+  Error Diffusion: 0.072
+  DBS Screen: 0.058
+  Differentiable: 0.131
+  Адаптивное: 0.140
+  Preview: 0.611
+
+City_Cl (11).jpg:
+  Упорядоченное: 0.110
+  Error Diffusion: 0.144
+  DBS Screen: 0.115
+  Differentiable: 0.259
+  Адаптивное: 0.263
+  Preview: 0.522
+
+City_Cl (12).jpg:
+  Упорядоченное: 0.057
+  Error Diffusion: 0.079
+  DBS Screen: 0.063
+  Differentiable: 0.133
+  Адаптивное: 0.139
+  Preview: 0.604
+
+City_Cl (13).jpg:
+  Упорядоченное: 0.080
+  Error Diffusion: 0.096
+  DBS Screen: 0.082
+  Differentiable: 0.161
+  Адаптивное: 0.144
+  Preview: 0.666
+
+City_Cl (14).jpg:
+  Упорядоченное: 0.098
+  Error Diffusion: 0.125
+  DBS Screen: 0.097
+  Differentiable: 0.257
+  Адаптивное: 0.250
+  Preview: 0.503
+
+City_Cl (15).jpg:
+  Упорядоченное: 0.115
+  Error Diffusion: 0.127
+  DBS Screen: 0.100
+  Differentiable: 0.230
+  Адаптивное: 0.227
+  Preview: 0.521
+
+City_Cl (16).jpg:
+  Упорядоченное: 0.163
+  Error Diffusion: 0.212
+  DBS Screen: 0.170
+  Differentiable: 0.256
+  Адаптивное: 0.248
+  Preview: 0.505
+
+City_Cl (17).jpg:
+  Упорядоченное: 0.092
+  Error Diffusion: 0.139
+  DBS Screen: 0.102
+  Differentiable: 0.221
+  Адаптивное: 0.238
+  Preview: 0.493
+
+City_Cl (18).jpg:
+  Упорядоченное: 0.253
+  Error Diffusion: 0.182
+  DBS Screen: 0.122
+  Differentiable: 0.200
+  Адаптивное: 0.162
+  Preview: 0.656
+
+City_Cl (19).jpg:
+  Упорядоченное: 0.039
+  Error Diffusion: 0.062
+  DBS Screen: 0.046
+  Differentiable: 0.096
+  Адаптивное: 0.110
+  Preview: 0.607
+
+City_Cl (2).jpg:
+  Упорядоченное: 0.088
+  Error Diffusion: 0.080
+  DBS Screen: 0.066
+  Differentiable: 0.175
+  Адаптивное: 0.173
+  Preview: 0.630
+
+City_Cl (20).jpg:
+  Упорядоченное: 0.076
+  Error Diffusion: 0.103
+  DBS Screen: 0.080
+  Differentiable: 0.230
+  Адаптивное: 0.231
+  Preview: 0.503
+
+City_Cl (21).jpg:
+  Упорядоченное: 0.056
+  Error Diffusion: 0.073
+  DBS Screen: 0.060
+  Differentiable: 0.167
+  Адаптивное: 0.176
+  Preview: 0.544
+
+City_Cl (22).jpg:
+  Упорядоченное: 0.085
+  Error Diffusion: 0.108
+  DBS Screen: 0.088
+  Differentiable: 0.205
+  Адаптивное: 0.197
+  Preview: 0.635
+
+City_Cl (23).jpg:
+  Упорядоченное: 0.096
+  Error Diffusion: 0.070
+  DBS Screen: 0.055
+  Differentiable: 0.126
+  Адаптивное: 0.125
+  Preview: 0.649
+
+City_Cl (24).jpg:
+  Упорядоченное: 0.055
+  Error Diffusion: 0.069
+  DBS Screen: 0.053
+  Differentiable: 0.152
+  Адаптивное: 0.139
+  Preview: 0.662
+
+City_Cl (25).jpg:
+  Упорядоченное: 0.148
+  Error Diffusion: 0.134
+  DBS Screen: 0.102
+  Differentiable: 0.227
+  Адаптивное: 0.216
+  Preview: 0.553
+
+City_Cl (26).jpg:
+  Упорядоченное: 0.113
+  Error Diffusion: 0.207
+  DBS Screen: 0.171
+  Differentiable: 0.152
+  Адаптивное: 0.168
+  Preview: 0.579
+
+City_Cl (27).jpg:
+  Упорядоченное: 0.055
+  Error Diffusion: 0.071
+  DBS Screen: 0.058
+  Differentiable: 0.153
+  Адаптивное: 0.157
+  Preview: 0.582

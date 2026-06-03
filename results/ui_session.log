@@ -1,0 +1,205 @@
+[2026-05-19 12:57:53] UI инициализирован.
+[2026-05-19 12:57:55] Запуск задачи: Инициализация системы
+[2026-05-19 12:57:55] Статус: Инициализация системы...
+[2026-05-19 12:57:55] Параметры синхронизированы: epochs=60, batch=16, lr=0.0003, img_size=(256, 256)
+[2026-05-19 12:57:55] Создание экземпляра AdaptiveHalftoningSystem...
+Используется устройство: cpu
+Путь к датасету: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\halftoning_dataset
+Путь для результатов: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results
+[2026-05-19 12:57:56] Экземпляр AdaptiveHalftoningSystem создан.
+[2026-05-19 12:57:56] Система инициализирована.
+[2026-05-19 12:57:56] Статус: Готово
+[2026-05-19 12:57:56] Задача завершена: Инициализация системы
+[2026-05-19 12:58:00] Запуск задачи: Загрузка модели
+[2026-05-19 12:58:00] Статус: Загрузка модели...
+[2026-05-19 12:58:00] Параметры синхронизированы: epochs=60, batch=16, lr=0.0003, img_size=(256, 256)
+[2026-05-19 12:58:00] Попытка загрузки модели: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\models\saved\adaptive_halftoning_model.pth
+Модель загружена: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\models\saved\adaptive_halftoning_model.pth
+[2026-05-19 12:58:00] Модель успешно загружена.
+[2026-05-19 12:58:00] Статус: Готово
+[2026-05-19 12:58:00] Задача завершена: Загрузка модели
+[2026-05-19 12:58:03] Запуск задачи: Обработка изображения
+[2026-05-19 12:58:03] Статус: Выбор изображения для обработки...
+[2026-05-19 12:58:08] Выбрано изображение для обработки: C:\Users\Иван\Pictures\Windows XP.jpg
+[2026-05-19 12:58:08] Параметры синхронизированы: epochs=60, batch=16, lr=0.0003, img_size=(256, 256)
+[2026-05-19 12:58:08] Перед обработкой загружается модель: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\models\saved\adaptive_halftoning_model.pth
+Модель загружена: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\models\saved\adaptive_halftoning_model.pth
+Ошибка при обработке C:\Users\Иван\Pictures\Windows XP.jpg: No module named 'skimage'
+[2026-05-19 12:58:08] Обработка изображения завершилась без результата.
+[2026-05-19 12:58:08] Статус: Готово
+[2026-05-19 12:58:08] Задача завершена: Обработка изображения
+[2026-05-19 13:05:56] UI инициализирован.
+[2026-05-19 13:05:58] Запуск задачи: Инициализация системы
+[2026-05-19 13:05:58] Статус: Инициализация системы...
+[2026-05-19 13:05:58] Параметры синхронизированы: epochs=60, batch=16, lr=0.0003, img_size=(256, 256)
+[2026-05-19 13:05:58] Создание экземпляра AdaptiveHalftoningSystem...
+Используется устройство: cpu
+Путь к датасету: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\halftoning_dataset
+Путь для результатов: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results
+[2026-05-19 13:05:59] Экземпляр AdaptiveHalftoningSystem создан.
+[2026-05-19 13:05:59] Система инициализирована.
+[2026-05-19 13:05:59] Статус: Готово
+[2026-05-19 13:05:59] Задача завершена: Инициализация системы
+[2026-05-19 13:06:03] Запуск задачи: Загрузка модели
+[2026-05-19 13:06:03] Статус: Загрузка модели...
+[2026-05-19 13:06:03] Параметры синхронизированы: epochs=60, batch=16, lr=0.0003, img_size=(256, 256)
+[2026-05-19 13:06:03] Попытка загрузки модели: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\models\saved\adaptive_halftoning_model.pth
+Модель загружена: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\models\saved\adaptive_halftoning_model.pth
+[2026-05-19 13:06:04] Модель успешно загружена.
+[2026-05-19 13:06:04] Статус: Готово
+[2026-05-19 13:06:04] Задача завершена: Загрузка модели
+[2026-05-19 13:06:05] Запуск задачи: Обработка изображения
+[2026-05-19 13:06:05] Статус: Выбор изображения для обработки...
+[2026-05-19 13:06:08] Выбрано изображение для обработки: C:\Users\Иван\Pictures\Windows XP.jpg
+[2026-05-19 13:06:08] Параметры синхронизированы: epochs=60, batch=16, lr=0.0003, img_size=(256, 256)
+[2026-05-19 13:06:08] Перед обработкой загружается модель: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\models\saved\adaptive_halftoning_model.pth
+Модель загружена: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\models\saved\adaptive_halftoning_model.pth
+Результаты сохранены: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results\Windows XP_results.png
+SSIM - Упорядоченное: 0.013, Error Diffusion: 0.022, Адаптивное: 0.016
+[2026-05-19 13:06:11] Результаты: ordered=0.0128, error=0.0225, adaptive=0.0161
+[2026-05-19 13:06:11] Статус: Готово
+[2026-05-19 13:06:11] Задача завершена: Обработка изображения
+[2026-05-19 14:19:26] UI инициализирован.
+[2026-05-19 14:19:30] Запуск задачи: Загрузка модели
+[2026-05-19 14:19:30] Статус: Загрузка модели...
+Используется устройство: cpu
+Путь к датасету: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\halftoning_dataset
+Путь для результатов: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results
+[2026-05-19 14:19:31] AdaptiveHalftoningSystem создан.
+Модель загружена: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\models\saved\adaptive_halftoning_model.pth
+[2026-05-19 14:19:31] Модель успешно загружена.
+[2026-05-19 14:19:31] Статус: Готово
+[2026-05-19 14:19:31] Задача завершена: Загрузка модели
+[2026-05-19 14:19:32] Запуск задачи: Инициализация системы
+[2026-05-19 14:19:32] Статус: Инициализация системы...
+Используется устройство: cpu
+Путь к датасету: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\halftoning_dataset
+Путь для результатов: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results
+[2026-05-19 14:19:33] AdaptiveHalftoningSystem создан.
+[2026-05-19 14:19:33] Статус: Готово
+[2026-05-19 14:19:33] Задача завершена: Инициализация системы
+[2026-05-19 14:19:34] Запуск задачи: Обработка изображения
+[2026-05-19 14:19:34] Статус: Выбор изображения для обработки...
+[2026-05-19 14:19:36] Выбрано изображение: C:\Users\Иван\Pictures\Windows XP.jpg
+Модель загружена: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\models\saved\adaptive_halftoning_model.pth
+Результаты сохранены: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results\Windows XP_results.png
+SSIM - Упорядоченное: 0.013, Error Diffusion: 0.022, DBS Screen: 0.019, Differentiable: 0.019, Адаптивное: 0.019, Preview: 0.821
+[2026-05-19 14:19:42] Результаты: ordered=0.0128, error=0.0225, dbs=0.0187, diff=0.0193, adaptive=0.0193, preview=0.8207
+[2026-05-19 14:19:42] Статус: Готово
+[2026-05-19 14:19:42] Задача завершена: Обработка изображения
+[2026-05-28 10:47:10] UI инициализирован.
+[2026-05-28 10:48:47] Запуск задачи: Загрузка модели
+[2026-05-28 10:48:47] Статус: Загрузка модели...
+Используется устройство: cpu
+Путь к датасету: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\halftoning_dataset
+Путь для результатов: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results
+[2026-05-28 10:48:47] AdaptiveHalftoningSystem создан.
+Модель загружена: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\models\saved\adaptive_halftoning_model.pth
+[2026-05-28 10:48:47] Модель успешно загружена.
+[2026-05-28 10:48:47] Статус: Готово
+[2026-05-28 10:48:47] Задача завершена: Загрузка модели
+[2026-05-28 10:48:50] Запуск задачи: Инициализация системы
+[2026-05-28 10:48:50] Статус: Инициализация системы...
+Используется устройство: cpu
+Путь к датасету: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\halftoning_dataset
+Путь для результатов: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results
+[2026-05-28 10:48:51] AdaptiveHalftoningSystem создан.
+[2026-05-28 10:48:51] Статус: Готово
+[2026-05-28 10:48:51] Задача завершена: Инициализация системы
+[2026-05-28 10:57:10] Запуск задачи: Пакетная обработка
+[2026-05-28 10:57:10] Статус: Пакетная обработка...
+Модель загружена: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\models\saved\adaptive_halftoning_model.pth
+Датасет: TEST
+Цвет: all, Категория: all
+Загружено изображений: 116
+Найдено 116 изображений для обработки
+[1/20] Обработка: City_Cl (1).jpg
+Результаты сохранены: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results\City_Cl (1)_results.png
+SSIM - Упорядоченное: 0.123, Error Diffusion: 0.174, DBS Screen: 0.141, Differentiable: 0.232, Адаптивное: 0.247, Preview: 0.499
+[2/20] Обработка: City_Cl (10).jpg
+Результаты сохранены: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results\City_Cl (10)_results.png
+SSIM - Упорядоченное: 0.051, Error Diffusion: 0.072, DBS Screen: 0.058, Differentiable: 0.131, Адаптивное: 0.140, Preview: 0.611
+[3/20] Обработка: City_Cl (11).jpg
+Результаты сохранены: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results\City_Cl (11)_results.png
+SSIM - Упорядоченное: 0.110, Error Diffusion: 0.144, DBS Screen: 0.115, Differentiable: 0.259, Адаптивное: 0.263, Preview: 0.522
+[4/20] Обработка: City_Cl (12).jpg
+Результаты сохранены: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results\City_Cl (12)_results.png
+SSIM - Упорядоченное: 0.057, Error Diffusion: 0.079, DBS Screen: 0.063, Differentiable: 0.133, Адаптивное: 0.139, Preview: 0.604
+[5/20] Обработка: City_Cl (13).jpg
+Результаты сохранены: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results\City_Cl (13)_results.png
+SSIM - Упорядоченное: 0.080, Error Diffusion: 0.096, DBS Screen: 0.082, Differentiable: 0.161, Адаптивное: 0.144, Preview: 0.666
+[6/20] Обработка: City_Cl (14).jpg
+Результаты сохранены: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results\City_Cl (14)_results.png
+SSIM - Упорядоченное: 0.098, Error Diffusion: 0.125, DBS Screen: 0.097, Differentiable: 0.257, Адаптивное: 0.250, Preview: 0.503
+[7/20] Обработка: City_Cl (15).jpg
+Результаты сохранены: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results\City_Cl (15)_results.png
+SSIM - Упорядоченное: 0.115, Error Diffusion: 0.127, DBS Screen: 0.100, Differentiable: 0.230, Адаптивное: 0.227, Preview: 0.521
+[8/20] Обработка: City_Cl (16).jpg
+Результаты сохранены: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results\City_Cl (16)_results.png
+SSIM - Упорядоченное: 0.163, Error Diffusion: 0.212, DBS Screen: 0.170, Differentiable: 0.256, Адаптивное: 0.248, Preview: 0.505
+[9/20] Обработка: City_Cl (17).jpg
+Результаты сохранены: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results\City_Cl (17)_results.png
+SSIM - Упорядоченное: 0.092, Error Diffusion: 0.139, DBS Screen: 0.102, Differentiable: 0.221, Адаптивное: 0.238, Preview: 0.493
+[10/20] Обработка: City_Cl (18).jpg
+Результаты сохранены: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results\City_Cl (18)_results.png
+SSIM - Упорядоченное: 0.253, Error Diffusion: 0.182, DBS Screen: 0.122, Differentiable: 0.200, Адаптивное: 0.162, Preview: 0.656
+[11/20] Обработка: City_Cl (19).jpg
+Результаты сохранены: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results\City_Cl (19)_results.png
+SSIM - Упорядоченное: 0.039, Error Diffusion: 0.062, DBS Screen: 0.046, Differentiable: 0.096, Адаптивное: 0.110, Preview: 0.607
+[12/20] Обработка: City_Cl (2).jpg
+Результаты сохранены: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results\City_Cl (2)_results.png
+SSIM - Упорядоченное: 0.088, Error Diffusion: 0.080, DBS Screen: 0.066, Differentiable: 0.175, Адаптивное: 0.173, Preview: 0.630
+[13/20] Обработка: City_Cl (20).jpg
+Результаты сохранены: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results\City_Cl (20)_results.png
+SSIM - Упорядоченное: 0.076, Error Diffusion: 0.103, DBS Screen: 0.080, Differentiable: 0.230, Адаптивное: 0.231, Preview: 0.503
+[14/20] Обработка: City_Cl (21).jpg
+Результаты сохранены: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results\City_Cl (21)_results.png
+SSIM - Упорядоченное: 0.056, Error Diffusion: 0.073, DBS Screen: 0.060, Differentiable: 0.167, Адаптивное: 0.176, Preview: 0.544
+[15/20] Обработка: City_Cl (22).jpg
+Результаты сохранены: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results\City_Cl (22)_results.png
+SSIM - Упорядоченное: 0.085, Error Diffusion: 0.108, DBS Screen: 0.088, Differentiable: 0.205, Адаптивное: 0.197, Preview: 0.635
+[16/20] Обработка: City_Cl (23).jpg
+Результаты сохранены: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results\City_Cl (23)_results.png
+SSIM - Упорядоченное: 0.096, Error Diffusion: 0.070, DBS Screen: 0.055, Differentiable: 0.126, Адаптивное: 0.125, Preview: 0.649
+[17/20] Обработка: City_Cl (24).jpg
+Результаты сохранены: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results\City_Cl (24)_results.png
+SSIM - Упорядоченное: 0.055, Error Diffusion: 0.069, DBS Screen: 0.053, Differentiable: 0.152, Адаптивное: 0.139, Preview: 0.662
+[18/20] Обработка: City_Cl (25).jpg
+Результаты сохранены: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results\City_Cl (25)_results.png
+SSIM - Упорядоченное: 0.148, Error Diffusion: 0.134, DBS Screen: 0.102, Differentiable: 0.227, Адаптивное: 0.216, Preview: 0.553
+[19/20] Обработка: City_Cl (26).jpg
+Результаты сохранены: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results\City_Cl (26)_results.png
+SSIM - Упорядоченное: 0.113, Error Diffusion: 0.207, DBS Screen: 0.171, Differentiable: 0.152, Адаптивное: 0.168, Preview: 0.579
+[20/20] Обработка: City_Cl (27).jpg
+Результаты сохранены: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results\City_Cl (27)_results.png
+SSIM - Упорядоченное: 0.055, Error Diffusion: 0.071, DBS Screen: 0.058, Differentiable: 0.153, Адаптивное: 0.157, Preview: 0.582
+
+============================================================
+ИТОГОВАЯ СТАТИСТИКА:
+============================================================
+Успешно обработано: 20/20
+Средний SSIM (упорядоченное): 0.098
+Средний SSIM (error diffusion): 0.116
+Средний SSIM (DBS screen): 0.091
+Средний SSIM (differentiable): 0.188
+Средний SSIM (адаптивное): 0.187
+Средний SSIM (preview): 0.576
+============================================================
+Сводный отчет сохранен: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results\summary_report_20260528_105827.txt
+[2026-05-28 10:58:27] Пакетная обработка завершена. Обработано: 20
+[2026-05-28 10:58:27] Статус: Готово
+[2026-05-28 10:58:27] Задача завершена: Пакетная обработка
+[2026-05-28 10:59:53] Запуск задачи: Обработка изображения
+[2026-05-28 10:59:53] Статус: Выбор изображения для обработки...
+[2026-05-28 10:59:55] Выбрано изображение: C:\Users\Иван\Pictures\Windows XP.jpg
+Модель загружена: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\models\saved\adaptive_halftoning_model.pth
+Результаты сохранены: c:\Users\Иван\Documents\GitHub\adaptive-halftoning\results\Windows XP_results.png
+SSIM - Упорядоченное: 0.013, Error Diffusion: 0.022, DBS Screen: 0.019, Differentiable: 0.019, Адаптивное: 0.022, Preview: 0.852
+[2026-05-28 10:59:59] Результаты: ordered=0.0128, error=0.0225, dbs=0.0187, diff=0.0193, adaptive=0.0220, preview=0.8519
+[2026-05-28 10:59:59] Статус: Готово
+[2026-05-28 10:59:59] Задача завершена: Обработка изображения
+[2026-05-28 11:29:52] Запуск задачи: Обработка изображения
+[2026-05-28 11:29:52] Статус: Выбор изображения для обработки...
+[2026-05-28 11:29:58] Пользователь отменил выбор изображения.
+[2026-05-28 11:29:58] Статус: Готово
+[2026-05-28 11:29:58] Задача завершена: Обработка изображения
