@@ -36,4 +36,4 @@ if __name__ == '__main__':
         print('   pip install torch torchvision numpy matplotlib pillow scikit-image scipy')
         print('3. Проверьте корректность файла models/unet.py и наличие __init__.py в пакетах.')
         print('=' * 60)
-        input('Нажмите Enter для выхода...')
+        input('Нажмите Enter для выхода...')  

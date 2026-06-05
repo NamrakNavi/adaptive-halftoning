@@ -134,6 +134,7 @@ class AdaptiveHalftoningUI:
             ('Загрузить модель', self.load_model),
             ('Обработать изображение', self.process_image),
             ('Пакетная обработка', self.batch_process),
+            ('Показать историю обучения', self.show_training_history),
             ('Очистить лог', self.clear_log),
         ]
 
@@ -180,10 +181,6 @@ class AdaptiveHalftoningUI:
     def set_status(self, text):
         self.status_var.set(text)
         self.root.update_idletasks()
-
-    def log(self, text):
-        self.log_widget.insert(tk.END, text + ' ')
-        self.log_widget.see(tk.END)
 
     def clear_log(self):
         self.log_widget.delete('1.0', tk.END)
@@ -291,7 +288,7 @@ class AdaptiveHalftoningUI:
         def task():
             self.set_status('Обучение модели...')
             system = self.ensure_system()
-            train_loader, _ = system.create_dataloaders(
+            train_loader, test_loader = system.create_dataloaders(
                 train_color=self.train_color_var.get(),
                 train_category=self.train_category_var.get(),
                 test_color=self.test_color_var.get(),
@@ -300,7 +297,7 @@ class AdaptiveHalftoningUI:
             if train_loader is None or len(train_loader) == 0:
                 print('Не удалось создать train_loader. Обучение отменено.')
                 return
-            system.train(train_loader, epochs=self.config.EPOCHS)
+            system.train(train_loader, val_loader=test_loader, epochs=self.config.EPOCHS)
             system.save_model(self.config.MODEL_SAVE_PATH)
             self.model_var.set(self.config.MODEL_SAVE_PATH)
             print(f'Обучение завершено. Модель сохранена: {self.config.MODEL_SAVE_PATH}')
@@ -320,41 +317,198 @@ class AdaptiveHalftoningUI:
         self.run_in_thread(task)
 
     def process_image(self):
+        # Открываем диалог выбора файла
+        image_path = filedialog.askopenfilename(
+            title='Выберите изображение для обработки',
+            filetypes=[
+                ('Image files', '*.png *.jpg *.jpeg *.bmp *.tif *.tiff'),
+                ('PNG files', '*.png'),
+                ('JPEG files', '*.jpg *.jpeg'),
+                ('All files', '*.*')
+            ]
+        )
+        
+        if not image_path:
+            print("Обработка отменена: файл не выбран")
+            return
+        
+        self.image_var.set(normalize_windows_path(image_path))
+        
         def task():
             self.set_status('Обработка изображения...')
             system = self.ensure_system()
-            image_path = normalize_windows_path(self.image_var.get().strip())
-            if not image_path or not os.path.exists(image_path):
+            
+            if not os.path.exists(image_path):
                 print(f'Файл изображения не найден: {image_path}')
                 return
+            
             model_path = normalize_windows_path(self.model_var.get().strip())
             if model_path and os.path.exists(model_path):
                 system.load_model(model_path)
+            
             result = system.process_image(image_path, save_results=True)
             if result:
-                print('Результаты обработки:')
-                print(f"Упорядоченное: SSIM = {result.get('ssim_ordered', 0):.4f}")
-                print(f"Error Diffusion: SSIM = {result.get('ssim_error', 0):.4f}")
-                print(f"Адаптивное: SSIM = {result.get('ssim_adaptive', 0):.4f}")
-                if 'ssim_adaptive_preview' in result:
-                    print(f"Адаптивное preview: SSIM = {result.get('ssim_adaptive_preview', 0):.4f}")
+                print(f'\n✅ Обработка завершена: {os.path.basename(image_path)}')
+                print(f'   Упорядоченное:    SSIM={result["ordered"]["ssim"]:.4f}, PSNR={result["ordered"]["psnr"]:.2f}dB')
+                print(f'   Error Diffusion: SSIM={result["error_diffusion"]["ssim"]:.4f}, PSNR={result["error_diffusion"]["psnr"]:.2f}dB')
+                print(f'   Адаптивное:      SSIM={result["adaptive"]["ssim"]:.4f}, PSNR={result["adaptive"]["psnr"]:.2f}dB')
+                
+                messagebox.showinfo(
+                    "Готово", 
+                    f"Изображение обработано!\n\n"
+                    f"Адаптивное растрирование:\n"
+                    f"  SSIM = {result['adaptive']['ssim']:.4f}\n"
+                    f"  PSNR = {result['adaptive']['psnr']:.2f} dB\n\n"
+                    f"Результаты сохранены в:\n{self.config.OUTPUT_DIR}"
+                )
+        
         self.run_in_thread(task)
 
     def batch_process(self):
         def task():
             self.set_status('Пакетная обработка...')
+            
+            self.sync_config_from_ui()
+            dataset_path = self.config.DATASET_PATH
+            
+            if not os.path.exists(dataset_path):
+                print(f'❌ Ошибка: Путь к датасету не существует: {dataset_path}')
+                return
+            
             system = self.ensure_system()
+            
             model_path = normalize_windows_path(self.model_var.get().strip())
             if model_path and os.path.exists(model_path):
                 system.load_model(model_path)
+                print(f'Загружена модель: {model_path}')
+            
             max_images = int(self.max_images_var.get().strip())
-            results = system.batch_process(
-                test_color=self.test_color_var.get(),
-                test_category=self.test_category_var.get(),
-                max_images=max_images,
+            test_color = self.test_color_var.get()
+            test_category = self.test_category_var.get()
+            
+            print(f'\n{"="*60}')
+            print('ПАКЕТНАЯ ОБРАБОТКА')
+            print(f'{"="*60}')
+            print(f'Датасет: {dataset_path}')
+            print(f'Цвет: {test_color}, Категория: {test_category}')
+            print(f'Максимум изображений: {max_images}')
+            print(f'{"="*60}\n')
+            
+            # Создаем датасет
+            from data.dataset import HalftoningDataset
+            from torchvision import transforms
+            
+            transform = transforms.Compose([
+                transforms.Resize(self.config.IMG_SIZE),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ])
+            
+            try:
+                test_dataset = HalftoningDataset(
+                    dataset_path,
+                    mode='test',
+                    color_type=test_color,
+                    category=test_category,
+                    transform=transform,
+                    target_size=self.config.IMG_SIZE
+                )
+            except Exception as e:
+                print(f'❌ Ошибка при создании датасета: {e}')
+                return
+            
+            if len(test_dataset) == 0:
+                print('❌ Ошибка: В датасете нет изображений для обработки!')
+                return
+            
+            num_images = min(len(test_dataset), max_images) if max_images > 0 else len(test_dataset)
+            print(f'Найдено изображений: {len(test_dataset)}')
+            print(f'Будет обработано: {num_images}\n')
+            
+            results = []
+            success = 0
+            failed = 0
+            
+            for i in range(num_images):
+                try:
+                    img_path = test_dataset.image_paths[i]
+                    print(f'[{i+1}/{num_images}] Обработка: {os.path.basename(img_path)}')
+                    
+                    result = system.process_image(img_path, save_results=True)
+                    if result:
+                        results.append(result)
+                        success += 1
+                        print(f'  ✓ SSIM: {result["adaptive"]["ssim"]:.4f}, PSNR: {result["adaptive"]["psnr"]:.2f}dB')
+                    else:
+                        failed += 1
+                        print(f'  ✗ Ошибка обработки')
+                except Exception as e:
+                    failed += 1
+                    print(f'  ✗ Ошибка: {e}')
+            
+            # Вывод итогов
+            print(f'\n{"="*60}')
+            print('ИТОГИ ПАКЕТНОЙ ОБРАБОТКИ')
+            print(f'{"="*60}')
+            print(f'✅ Успешно: {success}')
+            print(f'❌ Ошибок: {failed}')
+            
+            if results:
+                avg_ssim_ordered = sum(r["ordered"]["ssim"] for r in results) / len(results)
+                avg_ssim_adaptive = sum(r["adaptive"]["ssim"] for r in results) / len(results)
+                avg_psnr_ordered = sum(r["ordered"]["psnr"] for r in results) / len(results)
+                avg_psnr_adaptive = sum(r["adaptive"]["psnr"] for r in results) / len(results)
+                
+                print(f'\n📊 СРЕДНИЕ МЕТРИКИ (по {len(results)} изображениям):')
+                print(f'   Упорядоченное:    SSIM = {avg_ssim_ordered:.4f}, PSNR = {avg_psnr_ordered:.2f} dB')
+                print(f'   Адаптивное:       SSIM = {avg_ssim_adaptive:.4f}, PSNR = {avg_psnr_adaptive:.2f} dB')
+            
+            print(f'\n💾 Результаты сохранены в: {self.config.OUTPUT_DIR}')
+            print(f'{"="*60}\n')
+            
+            messagebox.showinfo(
+                "Пакетная обработка завершена",
+                f"✅ Обработано: {success}\n❌ Ошибок: {failed}\n\n"
+                f"📊 Средний SSIM (adaptive): {avg_ssim_adaptive:.4f}\n"
+                f"📊 Средний PSNR (adaptive): {avg_psnr_adaptive:.2f} dB"
             )
-            print(f'Пакетная обработка завершена. Обработано: {len(results)}')
+        
         self.run_in_thread(task)
+
+    def show_training_history(self):
+        """Показать историю обучения из загруженной модели"""
+        if self.system is None:
+            print("❌ Система не инициализирована. Нажмите 'Инициализировать систему' или 'Загрузить модель'")
+            return
+        
+        if not self.system.train_losses:
+            print("📊 История обучения не найдена. Модель не обучена или загружена без истории.")
+            return
+        
+        print(f'\n{"="*60}')
+        print('ИСТОРИЯ ОБУЧЕНИЯ')
+        print(f'{"="*60}')
+        print(f'Количество эпох: {len(self.system.train_losses)}')
+        print(f'Начальная loss: {self.system.train_losses[0]:.6f}')
+        print(f'Финальная loss: {self.system.train_losses[-1]:.6f}')
+        print(f'Улучшение: {(self.system.train_losses[0] - self.system.train_losses[-1]):.6f}')
+        
+        if self.system.val_losses:
+            print(f'\nВалидация:')
+            print(f'  Начальная val loss: {self.system.val_losses[0]:.6f}')
+            print(f'  Финальная val loss: {self.system.val_losses[-1]:.6f}')
+        
+        print(f'\n{"-"*40}')
+        print('Последние 10 эпох:')
+        print(f'{"Эпоха":<8} {"Train Loss":<12} {"Val Loss":<12}')
+        print(f'{"-"*40}')
+        
+        start = max(0, len(self.system.train_losses) - 10)
+        for i in range(start, len(self.system.train_losses)):
+            val_str = f"{self.system.val_losses[i]:.6f}" if i < len(self.system.val_losses) else "N/A"
+            print(f'{i+1:<8} {self.system.train_losses[i]:<12.6f} {val_str}')
+        
+        print(f'{"="*60}\n')
 
 
 def main():
