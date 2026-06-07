@@ -10,8 +10,8 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from config import Config
 from system.AdaptiveHalftoningSystem import AdaptiveHalftoningSystem
 from utils.file_utils import (
-    find_dataset_windows,
     normalize_windows_path,
+    find_dataset_windows,
     create_dataset_structure,
     check_dataset_structure,
 )
@@ -43,8 +43,6 @@ class AdaptiveHalftoningUI:
 
         self.config = Config()
         self.system = None
-        self.current_model_path = self.config.MODEL_SAVE_PATH
-        self.current_image_path = ''
 
         self._build_styles()
         self._build_ui()
@@ -134,13 +132,21 @@ class AdaptiveHalftoningUI:
             ('Загрузить модель', self.load_model),
             ('Обработать изображение', self.process_image),
             ('Пакетная обработка', self.batch_process),
-            ('Показать историю обучения', self.show_training_history),
+            ('Копировать лог', self.copy_log),
+            ('Сохранить лог', self.save_log),
             ('Очистить лог', self.clear_log),
         ]
 
         for idx, (text, cmd) in enumerate(btns):
-            ttk.Button(actions, text=text, command=cmd).grid(row=idx // 3, column=idx % 3, sticky='ew', padx=6, pady=6)
-        for i in range(3):
+            ttk.Button(actions, text=text, command=cmd).grid(
+                row=idx // 4,
+                column=idx % 4,
+                sticky='ew',
+                padx=6,
+                pady=6
+            )
+
+        for i in range(4):
             actions.columnconfigure(i, weight=1)
 
         log_frame = ttk.LabelFrame(main, text='Лог работы', padding=8)
@@ -148,6 +154,8 @@ class AdaptiveHalftoningUI:
 
         self.log_widget = tk.Text(log_frame, wrap='word', height=22)
         self.log_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.log_widget.bind("<Control-c>", self._copy_selection)
+        self.log_widget.bind("<Control-C>", self._copy_selection)
         scroll = ttk.Scrollbar(log_frame, orient='vertical', command=self.log_widget.yview)
         scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.log_widget.configure(yscrollcommand=scroll.set)
@@ -185,6 +193,59 @@ class AdaptiveHalftoningUI:
     def clear_log(self):
         self.log_widget.delete('1.0', tk.END)
 
+    def copy_log(self):
+        try:
+            text = self.log_widget.get('1.0', tk.END).strip()
+            if not text:
+                messagebox.showinfo('Лог', 'Лог пуст, копировать нечего.')
+                return
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self.root.update()
+            print('Лог скопирован в буфер обмена.')
+        except Exception as e:
+            messagebox.showerror('Ошибка', f'Не удалось скопировать лог: {e}')
+
+
+    def save_log(self):
+        try:
+            text = self.log_widget.get('1.0', tk.END).strip()
+            if not text:
+                messagebox.showinfo('Лог', 'Лог пуст, сохранять нечего.')
+                return
+
+            file_path = filedialog.asksaveasfilename(
+                title='Сохранить лог',
+                defaultextension='.txt',
+                filetypes=[
+                    ('Text files', '*.txt'),
+                    ('Log files', '*.log'),
+                    ('All files', '*.*')
+                ]
+            )
+
+            if not file_path:
+                return
+
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(text)
+
+            print(f'Лог сохранён: {file_path}')
+        except Exception as e:
+            messagebox.showerror('Ошибка', f'Не удалось сохранить лог: {e}')
+
+    def _copy_selection(self, event=None):
+        try:
+            selected = self.log_widget.get("sel.first", "sel.last")
+        except tk.TclError:
+            # Ничего не выделено — просто выходим
+            return "break"
+
+        # Чистим буфер обмена и кладём туда текст
+        self.root.clipboard_clear()
+        self.root.clipboard_append(selected)
+        return "break"
+
     def choose_dataset(self):
         path = filedialog.askdirectory(title='Выберите папку датасета')
         if path:
@@ -203,10 +264,14 @@ class AdaptiveHalftoningUI:
         if path:
             self.model_var.set(normalize_windows_path(path))
 
+
     def choose_image(self):
         path = filedialog.askopenfilename(
             title='Выберите изображение',
-            filetypes=[('Images', '*.png;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff'), ('All files', '*.*')]
+            filetypes=[
+                ('Images', '*.png;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff'),
+                ('All files', '*.*')
+            ]
         )
         if path:
             self.image_var.set(normalize_windows_path(path))
@@ -241,6 +306,28 @@ class AdaptiveHalftoningUI:
             self.set_status('Ошибка')
             traceback.print_exc()
             messagebox.showerror('Ошибка', str(e))
+
+    def _print_result_metrics(self, result):
+        print(f'Результаты обработки: {result["image_name"]}')
+        for method_key, payload in result.items():
+            if method_key in ('image_name', 'original', 'original_gray'):
+                continue
+            if not isinstance(payload, dict):
+                continue
+
+            title = payload.get('title', method_key)
+            metrics = payload.get('metrics', {})
+            print(f'{title}:')
+
+            for metric_name, metric_value in metrics.items():
+                if isinstance(metric_value, float):
+                    if metric_value == float('inf'):
+                        value_str = 'inf'
+                    else:
+                        value_str = f'{metric_value:.6f}'
+                else:
+                    value_str = str(metric_value)
+                print(f'  {metric_name} = {value_str}')
 
     def auto_find_dataset(self):
         def task():
@@ -317,198 +404,91 @@ class AdaptiveHalftoningUI:
         self.run_in_thread(task)
 
     def process_image(self):
-        # Открываем диалог выбора файла
-        image_path = filedialog.askopenfilename(
-            title='Выберите изображение для обработки',
-            filetypes=[
-                ('Image files', '*.png *.jpg *.jpeg *.bmp *.tif *.tiff'),
-                ('PNG files', '*.png'),
-                ('JPEG files', '*.jpg *.jpeg'),
-                ('All files', '*.*')
-            ]
-        )
-        
-        if not image_path:
-            print("Обработка отменена: файл не выбран")
-            return
-        
-        self.image_var.set(normalize_windows_path(image_path))
-        
-        def task():
-            self.set_status('Обработка изображения...')
-            system = self.ensure_system()
-            
-            if not os.path.exists(image_path):
-                print(f'Файл изображения не найден: {image_path}')
-                return
-            
-            model_path = normalize_windows_path(self.model_var.get().strip())
-            if model_path and os.path.exists(model_path):
-                system.load_model(model_path)
-            
-            result = system.process_image(image_path, save_results=True)
-            if result:
-                print(f'\n✅ Обработка завершена: {os.path.basename(image_path)}')
-                print(f'   Упорядоченное:    SSIM={result["ordered"]["ssim"]:.4f}, PSNR={result["ordered"]["psnr"]:.2f}dB')
-                print(f'   Error Diffusion: SSIM={result["error_diffusion"]["ssim"]:.4f}, PSNR={result["error_diffusion"]["psnr"]:.2f}dB')
-                print(f'   Адаптивное:      SSIM={result["adaptive"]["ssim"]:.4f}, PSNR={result["adaptive"]["psnr"]:.2f}dB')
-                
-                messagebox.showinfo(
-                    "Готово", 
-                    f"Изображение обработано!\n\n"
-                    f"Адаптивное растрирование:\n"
-                    f"  SSIM = {result['adaptive']['ssim']:.4f}\n"
-                    f"  PSNR = {result['adaptive']['psnr']:.2f} dB\n\n"
-                    f"Результаты сохранены в:\n{self.config.OUTPUT_DIR}"
+            def task():
+                from tkinter import filedialog
+                import os   # оставить
+
+                self.set_status("Обработка изображения...")
+
+                # 1. Каждый раз спрашиваем новый файл
+                path = filedialog.askopenfilename(
+                    title="Выберите изображение",
+                    filetypes=(
+                        ("Images", "*.png;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff"),
+                        ("All files", "*.*"),
+                    ),
                 )
-        
-        self.run_in_thread(task)
+                if not path:
+                    print("Обработка отменена пользователем")
+                    self.set_status("Готово")
+                    return
+
+                # 2. Сохраняем путь в поле и нормализуем
+                self.image_var.set(path)
+                image_path = normalize_windows_path(path)
+
+                if not os.path.exists(image_path):
+                    print(f"Image not found: {image_path}")
+                    self.set_status("Ошибка: файл не найден")
+                    return
+
+                # 3. Готовим систему и модель
+                system = self.ensure_system()
+
+                model_path = normalize_windows_path(self.model_var.get().strip())
+                if model_path and os.path.exists(model_path):
+                    system.load_model(model_path)
+
+                # 4. Обрабатываем выбранное изображение
+                result = system.process_image(image_path, save_results=True)
+                if result:
+                    print("\n[DEBUG] Структура metrics для Ordered:")
+                    print(result.get('ordered', {}).get('metrics'))
+                    print("\nРезультаты метрик:")
+                    print(f"Файл: {result.get('image_name', '')}")
+
+                    def show_metrics(name):
+                        block = result.get(name, {})
+                        title = block.get('title', name)
+                        metrics = block.get('metrics', {})
+                        print(f"\n{title}:")
+                        print(f"  SSIM : {metrics.get('SSIM', 0.0):0.4f}")
+                        print(f"  MSE  : {metrics.get('MSE', 0.0):0.4f}")
+                        print(f"  PSNR : {metrics.get('PSNR', 0.0):0.4f} dB")
+                        print(f"  MAE  : {metrics.get('MAE', 0.0):0.4f}")
+                        print(f"  RMSE  : {metrics.get('RMSE', 0.0):0.4f}")
+
+                    # Классические методы
+                    show_metrics('ordered')
+                    show_metrics('error_diffusion')
+
+                    # CNN‑метод и его превью
+                    show_metrics('adaptive')
+                    show_metrics('adaptive_preview')
+
+                    # Дифференцируемый метод и превью
+                    show_metrics('differentiable')
+                    show_metrics('differentiable_preview')
+
+                self.set_status("Готово")
+
+            self.run_in_thread(task)
 
     def batch_process(self):
         def task():
             self.set_status('Пакетная обработка...')
-            
-            self.sync_config_from_ui()
-            dataset_path = self.config.DATASET_PATH
-            
-            if not os.path.exists(dataset_path):
-                print(f'❌ Ошибка: Путь к датасету не существует: {dataset_path}')
-                return
-            
             system = self.ensure_system()
-            
             model_path = normalize_windows_path(self.model_var.get().strip())
             if model_path and os.path.exists(model_path):
                 system.load_model(model_path)
-                print(f'Загружена модель: {model_path}')
-            
             max_images = int(self.max_images_var.get().strip())
-            test_color = self.test_color_var.get()
-            test_category = self.test_category_var.get()
-            
-            print(f'\n{"="*60}')
-            print('ПАКЕТНАЯ ОБРАБОТКА')
-            print(f'{"="*60}')
-            print(f'Датасет: {dataset_path}')
-            print(f'Цвет: {test_color}, Категория: {test_category}')
-            print(f'Максимум изображений: {max_images}')
-            print(f'{"="*60}\n')
-            
-            # Создаем датасет
-            from data.dataset import HalftoningDataset
-            from torchvision import transforms
-            
-            transform = transforms.Compose([
-                transforms.Resize(self.config.IMG_SIZE),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-            ])
-            
-            try:
-                test_dataset = HalftoningDataset(
-                    dataset_path,
-                    mode='test',
-                    color_type=test_color,
-                    category=test_category,
-                    transform=transform,
-                    target_size=self.config.IMG_SIZE
-                )
-            except Exception as e:
-                print(f'❌ Ошибка при создании датасета: {e}')
-                return
-            
-            if len(test_dataset) == 0:
-                print('❌ Ошибка: В датасете нет изображений для обработки!')
-                return
-            
-            num_images = min(len(test_dataset), max_images) if max_images > 0 else len(test_dataset)
-            print(f'Найдено изображений: {len(test_dataset)}')
-            print(f'Будет обработано: {num_images}\n')
-            
-            results = []
-            success = 0
-            failed = 0
-            
-            for i in range(num_images):
-                try:
-                    img_path = test_dataset.image_paths[i]
-                    print(f'[{i+1}/{num_images}] Обработка: {os.path.basename(img_path)}')
-                    
-                    result = system.process_image(img_path, save_results=True)
-                    if result:
-                        results.append(result)
-                        success += 1
-                        print(f'  ✓ SSIM: {result["adaptive"]["ssim"]:.4f}, PSNR: {result["adaptive"]["psnr"]:.2f}dB')
-                    else:
-                        failed += 1
-                        print(f'  ✗ Ошибка обработки')
-                except Exception as e:
-                    failed += 1
-                    print(f'  ✗ Ошибка: {e}')
-            
-            # Вывод итогов
-            print(f'\n{"="*60}')
-            print('ИТОГИ ПАКЕТНОЙ ОБРАБОТКИ')
-            print(f'{"="*60}')
-            print(f'✅ Успешно: {success}')
-            print(f'❌ Ошибок: {failed}')
-            
-            if results:
-                avg_ssim_ordered = sum(r["ordered"]["ssim"] for r in results) / len(results)
-                avg_ssim_adaptive = sum(r["adaptive"]["ssim"] for r in results) / len(results)
-                avg_psnr_ordered = sum(r["ordered"]["psnr"] for r in results) / len(results)
-                avg_psnr_adaptive = sum(r["adaptive"]["psnr"] for r in results) / len(results)
-                
-                print(f'\n📊 СРЕДНИЕ МЕТРИКИ (по {len(results)} изображениям):')
-                print(f'   Упорядоченное:    SSIM = {avg_ssim_ordered:.4f}, PSNR = {avg_psnr_ordered:.2f} dB')
-                print(f'   Адаптивное:       SSIM = {avg_ssim_adaptive:.4f}, PSNR = {avg_psnr_adaptive:.2f} dB')
-            
-            print(f'\n💾 Результаты сохранены в: {self.config.OUTPUT_DIR}')
-            print(f'{"="*60}\n')
-            
-            messagebox.showinfo(
-                "Пакетная обработка завершена",
-                f"✅ Обработано: {success}\n❌ Ошибок: {failed}\n\n"
-                f"📊 Средний SSIM (adaptive): {avg_ssim_adaptive:.4f}\n"
-                f"📊 Средний PSNR (adaptive): {avg_psnr_adaptive:.2f} dB"
+            results = system.batch_process(
+                test_color=self.test_color_var.get(),
+                test_category=self.test_category_var.get(),
+                max_images=max_images,
             )
-        
+            print(f'Пакетная обработка завершена. Обработано: {len(results)}')
         self.run_in_thread(task)
-
-    def show_training_history(self):
-        """Показать историю обучения из загруженной модели"""
-        if self.system is None:
-            print("❌ Система не инициализирована. Нажмите 'Инициализировать систему' или 'Загрузить модель'")
-            return
-        
-        if not self.system.train_losses:
-            print("📊 История обучения не найдена. Модель не обучена или загружена без истории.")
-            return
-        
-        print(f'\n{"="*60}')
-        print('ИСТОРИЯ ОБУЧЕНИЯ')
-        print(f'{"="*60}')
-        print(f'Количество эпох: {len(self.system.train_losses)}')
-        print(f'Начальная loss: {self.system.train_losses[0]:.6f}')
-        print(f'Финальная loss: {self.system.train_losses[-1]:.6f}')
-        print(f'Улучшение: {(self.system.train_losses[0] - self.system.train_losses[-1]):.6f}')
-        
-        if self.system.val_losses:
-            print(f'\nВалидация:')
-            print(f'  Начальная val loss: {self.system.val_losses[0]:.6f}')
-            print(f'  Финальная val loss: {self.system.val_losses[-1]:.6f}')
-        
-        print(f'\n{"-"*40}')
-        print('Последние 10 эпох:')
-        print(f'{"Эпоха":<8} {"Train Loss":<12} {"Val Loss":<12}')
-        print(f'{"-"*40}')
-        
-        start = max(0, len(self.system.train_losses) - 10)
-        for i in range(start, len(self.system.train_losses)):
-            val_str = f"{self.system.val_losses[i]:.6f}" if i < len(self.system.val_losses) else "N/A"
-            print(f'{i+1:<8} {self.system.train_losses[i]:<12.6f} {val_str}')
-        
-        print(f'{"="*60}\n')
 
 
 def main():

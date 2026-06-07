@@ -1,75 +1,85 @@
+import math
 import os
-
 import matplotlib.pyplot as plt
 
 
 def _format_metrics(metrics):
     lines = []
     for key, value in metrics.items():
-        if value is None:
-            lines.append(f'{key}: n/a')
-        elif value == float('inf'):
-            lines.append(f'{key}: inf')
+        if isinstance(value, float):
+            value_str = 'inf' if math.isinf(value) else f'{value:.4f}'
         else:
-            lines.append(f'{key}: {value:.4f}')
+            value_str = str(value)
+        lines.append(f'{key}: {value_str}')
     return '\n'.join(lines)
 
 
-def plot_training_loss(losses, output_dir):
-    plt.figure(figsize=(10, 6))
-    plt.plot(range(1, len(losses) + 1), losses, marker='o', linestyle='-', linewidth=2)
-    plt.xlabel('Эпоха')
-    plt.ylabel('Средняя функция потерь')
-    plt.title('Кривая обучения')
-    plt.grid(True, alpha=0.3)
-    plot_path = os.path.join(output_dir, 'training_loss.png')
-    plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-    plt.close()
-    print(f'График обучения сохранен: {plot_path}')
+def plot_results(original, methods, image_name, output_dir):
+    display_items = [
+        ('original', {'title': 'Original', 'image': original, 'metrics': {}}),
+    ]
 
+    ordered_keys = [
+        'ordered',
+        'error_diffusion',
+        'adaptive',
+        'adaptive_preview',
+        'differentiable',
+        'differentiable_preview'
+    ]
 
-def plot_results(original, ordered, error_diff, adaptive, adaptive_preview,
-                 threshold_map, param_map, metrics_by_method,
-                 image_name, output_dir):
-    fig, axes = plt.subplots(2, 4, figsize=(18, 10))
+    for key in ordered_keys:
+        if key in methods:
+            display_items.append((key, methods[key]))
 
-    axes[0, 0].imshow(original)
-    axes[0, 0].set_title('Оригинал')
-    axes[0, 0].axis('off')
+    n = len(display_items)
+    cols = 3
+    rows = math.ceil(n / cols)
+    fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 5.4 * rows))
 
-    axes[0, 1].imshow(ordered, cmap='gray', vmin=0, vmax=1)
-    axes[0, 1].set_title('Упорядоченное')
-    axes[0, 1].axis('off')
+    if rows == 1 and cols == 1:
+        axes = [[axes]]
+    elif rows == 1:
+        axes = [axes]
+    elif cols == 1:
+        axes = [[ax] for ax in axes]
 
-    axes[0, 2].imshow(error_diff, cmap='gray', vmin=0, vmax=1)
-    axes[0, 2].set_title('Error Diffusion')
-    axes[0, 2].axis('off')
+    flat_axes = [ax for row in axes for ax in row]
 
-    axes[0, 3].imshow(adaptive, cmap='gray', vmin=0, vmax=1)
-    axes[0, 3].set_title('Адаптивное')
-    axes[0, 3].axis('off')
+    for ax, (_, item) in zip(flat_axes, display_items):
+        image = item['image']
+        if getattr(image, 'ndim', 2) == 2:
+            ax.imshow(image, cmap='gray')
+        else:
+            ax.imshow(image)
 
-    axes[1, 0].imshow(adaptive_preview, cmap='gray', vmin=0, vmax=1)
-    axes[1, 0].set_title('Adaptive Preview')
-    axes[1, 0].axis('off')
+        title = item.get('title', 'Метод')
+        metrics = item.get('metrics', {})
+        if metrics:
+            ax.set_title(f'{title}\n{_format_metrics(metrics)}', fontsize=9)
+        else:
+            ax.set_title(title, fontsize=10)
+        ax.axis('off')
 
-    axes[1, 1].imshow(threshold_map, cmap='viridis')
-    axes[1, 1].set_title('Карта порога')
-    axes[1, 1].axis('off')
-
-    axes[1, 2].imshow(param_map, cmap='magma')
-    axes[1, 2].set_title('Карта параметров')
-    axes[1, 2].axis('off')
-
-    axes[1, 3].axis('off')
-    text_blocks = []
-    for method_name, metric_values in metrics_by_method.items():
-        text_blocks.append(f'{method_name}\n' + _format_metrics(metric_values))
-    axes[1, 3].text(0.01, 0.99, '\n\n'.join(text_blocks), va='top', ha='left', fontsize=10, family='monospace')
-    axes[1, 3].set_title('Метрики')
+    for ax in flat_axes[len(display_items):]:
+        ax.axis('off')
 
     plt.tight_layout()
     save_path = os.path.join(output_dir, f'{os.path.splitext(image_name)[0]}_results.png')
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close()
     print(f'Результаты сохранены: {save_path}')
+
+
+def plot_training_loss(losses, output_dir):
+    plt.figure(figsize=(10, 5))
+    plt.plot(losses, marker='o')
+    plt.title('График функции потерь')
+    plt.xlabel('Эпоха')
+    plt.ylabel('Loss')
+    plt.grid(True, alpha=0.3)
+    save_path = os.path.join(output_dir, 'training_loss.png')
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=200, bbox_inches='tight')
+    plt.close()
+    print(f'График loss сохранен: {save_path}')

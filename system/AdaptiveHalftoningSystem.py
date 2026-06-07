@@ -1,21 +1,17 @@
-import csv
 import os
-import time
-
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from PIL import Image
 from torch.utils.data import DataLoader
+from PIL import Image
+from skimage.metrics import structural_similarity as ssim
 
 from models.unet import UNet
 from algorithms.halftoning_algorithms import HalftoningAlgorithms
 from data.dataset import HalftoningDataset
-from utils.file_utils import ensure_dir
-from utils.metrics import compute_quality_metrics, fid_metric
-from utils.training_logger import TrainingLogger
 from utils.visualization import plot_results, plot_training_loss
+from utils.file_utils import ensure_dir
 
 
 class AdaptiveHalftoningSystem:
@@ -28,9 +24,6 @@ class AdaptiveHalftoningSystem:
         self.criterion = nn.BCEWithLogitsLoss()
         self.halftoner = HalftoningAlgorithms(config)
         ensure_dir(config.OUTPUT_DIR)
-        ensure_dir(config.LOGS_DIR)
-        ensure_dir(config.PLOTS_DIR)
-        ensure_dir(config.METRICS_DIR)
         print(f'Используется устройство: {self.device}')
 
     def create_dataloaders(self, train_color='all', train_category='all', test_color='all', test_category='all', transform=None):
@@ -71,24 +64,25 @@ class AdaptiveHalftoningSystem:
             return max(self.config.MIN_BATCH_SIZE, min(dataset_size, self.config.BATCH_SIZE))
         return self.config.BATCH_SIZE
 
-    def train(self, train_loader, epochs=None):
+    def train(self, train_loader, val_loader=None, epochs=None):
         if train_loader is None or len(train_loader) == 0:
             print('Невозможно обучить модель: нет данных')
             return
         if epochs is None:
             epochs = self.config.EPOCHS
 
-        logger = TrainingLogger(self.config.OUTPUT_DIR, self.config)
         self.model.train()
         losses = []
         for epoch in range(epochs):
-            epoch_start = time.time()
             total_loss = 0.0
             num_batches = 0
-
-            for batch_idx, (images, targets) in enumerate(train_loader, start=1):
+            for batch in train_loader:
+                if not isinstance(batch, (list, tuple)) or len(batch) != 2:
+                    continue
+                images, targets = batch
                 images = images.to(self.device)
                 targets = targets.to(self.device)
+
                 self.optimizer.zero_grad()
                 outputs = self.model(images)
                 loss = self.criterion(outputs, targets)
@@ -98,26 +92,17 @@ class AdaptiveHalftoningSystem:
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 self.optimizer.step()
 
-                loss_value = loss.item()
-                total_loss += loss_value
+                total_loss += float(loss.item())
                 num_batches += 1
-                lr = self.optimizer.param_groups[0]['lr']
-                logger.log_batch(epoch + 1, batch_idx, len(train_loader), loss_value, lr)
-
-                if batch_idx % max(1, len(train_loader) // 5) == 0:
-                    print(f'Epoch {epoch + 1}/{epochs}, Batch {batch_idx}/{len(train_loader)}, Loss: {loss_value:.6f}, LR: {lr:.8f}')
 
             if num_batches > 0:
                 avg_loss = total_loss / num_batches
-                epoch_duration = time.time() - epoch_start
                 losses.append(avg_loss)
-                logger.log_epoch(epoch + 1, avg_loss, self.optimizer.param_groups[0]['lr'], epoch_duration, num_batches)
-                print(f'Эпоха {epoch + 1} завершена. Средняя loss: {avg_loss:.6f}. Время: {epoch_duration:.2f} сек.')
+                print(f'Epoch {epoch + 1}/{epochs}, loss = {avg_loss:.6f}')
 
         self.save_model()
-        logger.finalize()
         if losses:
-            plot_training_loss(losses, self.config.PLOTS_DIR)
+            plot_training_loss(losses, self.config.OUTPUT_DIR)
 
     def save_model(self, path=None):
         if path is None:
@@ -143,140 +128,169 @@ class AdaptiveHalftoningSystem:
         print(f'Модель не найдена: {path}')
         return False
 
+    def _to_gray(self, image_np):
+        if image_np.ndim == 3:
+            return (0.299 * image_np[:, :, 0] + 0.587 * image_np[:, :, 1] + 0.114 * image_np[:, :, 2]).astype(np.float32)
+        return image_np.astype(np.float32)
+
+    def _calculate_metrics(self, reference, candidate):
+        reference = np.clip(reference.astype(np.float32), 0.0, 1.0)
+        candidate = np.clip(candidate.astype(np.float32), 0.0, 1.0)
+        mse = float(np.mean((reference - candidate) ** 2))
+        mae = float(np.mean(np.abs(reference - candidate)))
+        rmse = float(np.sqrt(mse))
+        psnr = float('inf') if mse <= 1e-12 else float(10.0 * np.log10(1.0 / mse))
+        ssim_value = float(ssim(reference, candidate, data_range=1.0))
+        return {
+            'SSIM': ssim_value,
+            'PSNR': psnr,
+            'MSE': mse,
+            'MAE': mae,
+            'RMSE': rmse,
+        }
+
+    def _save_single_outputs(self, image_path, result):
+        base_name = os.path.splitext(os.path.basename(image_path))[0]
+        for method_key, payload in result.items():
+            if method_key in ('image_name', 'original', 'original_gray'):
+                continue
+            if not isinstance(payload, dict) or 'image' not in payload:
+                continue
+            image = np.clip(payload['image'], 0.0, 1.0)
+            save_name = payload.get('save_name', method_key)
+            Image.fromarray((image * 255).astype(np.uint8)).save(
+                os.path.join(self.config.OUTPUT_DIR, f'{base_name}_{save_name}.png')
+            )
+
+    def _differentiable(self, image_np):
+        """Differentiable-метод: полутоновая карта + бинаризация с адаптивным порогом."""
+        if isinstance(image_np, np.ndarray):
+            img = image_np.astype(np.float32)
+            if img.max() > 1.0:
+                img = img / 255.0
+        else:
+            raise TypeError('Differentiable ожидает numpy.ndarray')
+
+        # Приводим к CHW
+        if img.ndim == 2:
+            img_chw = np.stack([img, img, img], axis=0)
+        elif img.ndim == 3:
+            if img.shape[0] == 3:
+                img_chw = img
+            else:
+                img_chw = np.transpose(img, (2, 0, 1))
+        else:
+            raise ValueError(f'Неподдерживаемая форма изображения: {img.shape}')
+
+        tensor = torch.FloatTensor(img_chw).unsqueeze(0).to(self.device)
+        self.model.eval()
+        with torch.no_grad():
+            logits = self.model(tensor)          # [1, 1, H, W]
+            prob = torch.sigmoid(logits).cpu().numpy().squeeze().astype(np.float32)
+
+        # Нормальное (полутоновое) представление
+        preview = np.clip(prob, 0.0, 1.0)
+
+        # Адаптивный порог: медиана + сдвиг (чтобы избежать полностью черного/белого)
+        p_med = float(np.median(preview))
+        p_std = float(preview.std())
+        thresh = p_med + 0.1 * p_std  # можно крутить 0.1
+
+        binary = (preview > thresh).astype(np.float32)
+
+        return {
+            'binary': binary,
+            'preview': preview,
+        }
+
     def process_image(self, image_path, save_results=True):
         try:
             image = Image.open(image_path).convert('RGB')
             image_np = np.array(image.resize(self.config.IMG_SIZE), dtype=np.float32) / 255.0
-            gray_image = 0.299 * image_np[:, :, 0] + 0.587 * image_np[:, :, 1] + 0.114 * image_np[:, :, 2]
+            gray_image = self._to_gray(image_np)
 
             ordered = self.halftoner.ordered_dithering(image_np)
             error_diff = self.halftoner.error_diffusion(image_np)
             adaptive_result = self.halftoner.adaptive_halftoning(image_np, self.model, self.device, return_details=True)
             adaptive = adaptive_result['halftone']
             adaptive_preview = adaptive_result['preview']
-            threshold_map = adaptive_result['threshold_map']
-            param_map = adaptive_result['param_map']
+            differentiable_result = self._differentiable(image_np)
+            differentiable_bin = differentiable_result['binary']
+            differentiable_prev = differentiable_result['preview']
 
-            metrics_by_method = {
-                'Ordered': compute_quality_metrics(gray_image, ordered, include_optional=self.config.ENABLE_OPTIONAL_METRICS),
-                'Error Diffusion': compute_quality_metrics(gray_image, error_diff, include_optional=self.config.ENABLE_OPTIONAL_METRICS),
-                'Adaptive': compute_quality_metrics(gray_image, adaptive, include_optional=self.config.ENABLE_OPTIONAL_METRICS),
-                'Adaptive Preview': compute_quality_metrics(gray_image, adaptive_preview, include_optional=self.config.ENABLE_OPTIONAL_METRICS),
+            result = {
+                'image_name': os.path.basename(image_path),
+                'original': image_np,
+                'original_gray': gray_image,
+                'ordered': {
+                    'title': 'Ordered Dithering',
+                    'save_name': 'ordered',
+                    'image': ordered,
+                    'metrics': self._calculate_metrics(gray_image, ordered)
+                },
+                'error_diffusion': {
+                    'title': 'Error Diffusion',
+                    'save_name': 'error_diffusion',
+                    'image': error_diff,
+                    'metrics': self._calculate_metrics(gray_image, error_diff)
+                },
+                'adaptive': {
+                    'title': 'Adaptive Halftoning',
+                    'save_name': 'adaptive',
+                    'image': adaptive,
+                    'metrics': self._calculate_metrics(gray_image, adaptive)
+                },
+                'differentiable': {
+                    'title': 'Differentiable',
+                    'save_name': 'differentiable',
+                    'image': np.clip(differentiable_bin, 0.0, 1.0),
+                    'metrics': self._calculate_metrics(gray_image, np.clip(differentiable_bin, 0.0, 1.0))
+                },
+                'differentiable_preview': {
+                    'title': 'Differentiable Preview',
+                    'save_name': 'differentiable_preview',
+                    'image': np.clip(differentiable_prev, 0.0, 1.0),
+                    'metrics': self._calculate_metrics(gray_image, np.clip(differentiable_prev, 0.0, 1.0))
+                },
+                'adaptive_preview': {
+                    'title': 'Adaptive Preview',
+                    'save_name': 'adaptive_preview',
+                    'image': np.clip(adaptive_preview, 0.0, 1.0),
+                    'metrics': self._calculate_metrics(gray_image, np.clip(adaptive_preview, 0.0, 1.0))
+                }
             }
 
             if save_results:
-                plot_results(
-                    image_np, ordered, error_diff, adaptive, adaptive_preview,
-                    threshold_map, param_map, metrics_by_method,
-                    os.path.basename(image_path), self.config.OUTPUT_DIR
-                )
-                self._save_single_outputs(image_path, ordered, error_diff, adaptive, adaptive_preview, threshold_map, param_map)
-                self._save_metrics_csv(os.path.basename(image_path), metrics_by_method)
+                plot_results(image_np, result, os.path.basename(image_path), self.config.OUTPUT_DIR)
+                self._save_single_outputs(image_path, result)
 
-            return {
-                'image_name': os.path.basename(image_path),
-                'metrics': metrics_by_method,
-                'ssim_ordered': metrics_by_method['Ordered']['SSIM'],
-                'ssim_error': metrics_by_method['Error Diffusion']['SSIM'],
-                'ssim_adaptive': metrics_by_method['Adaptive']['SSIM'],
-                'ssim_adaptive_preview': metrics_by_method['Adaptive Preview']['SSIM'],
-            }
+            return result
         except Exception as e:
             print(f'Ошибка при обработке {image_path}: {e}')
             return None
 
-    def _save_single_outputs(self, image_path, ordered, error_diff, adaptive, adaptive_preview, threshold_map, param_map):
-        base_name = os.path.splitext(os.path.basename(image_path))[0]
-        Image.fromarray((ordered * 255).astype(np.uint8)).save(os.path.join(self.config.OUTPUT_DIR, f'{base_name}_ordered.png'))
-        Image.fromarray((error_diff * 255).astype(np.uint8)).save(os.path.join(self.config.OUTPUT_DIR, f'{base_name}_error_diffusion.png'))
-        Image.fromarray((adaptive * 255).astype(np.uint8)).save(os.path.join(self.config.OUTPUT_DIR, f'{base_name}_adaptive.png'))
-        Image.fromarray((adaptive_preview * 255).astype(np.uint8)).save(os.path.join(self.config.OUTPUT_DIR, f'{base_name}_adaptive_preview.png'))
-        Image.fromarray((threshold_map * 255).astype(np.uint8)).save(os.path.join(self.config.OUTPUT_DIR, f'{base_name}_threshold_map.png'))
-        Image.fromarray((param_map * 255).astype(np.uint8)).save(os.path.join(self.config.OUTPUT_DIR, f'{base_name}_param_map.png'))
-
-    def _save_metrics_csv(self, image_name, metrics_by_method):
-        csv_path = os.path.join(self.config.METRICS_DIR, f'{os.path.splitext(image_name)[0]}_metrics.csv')
-        keys = set()
-        for method_metrics in metrics_by_method.values():
-            keys.update(method_metrics.keys())
-        keys = ['method'] + sorted(keys)
-        with open(csv_path, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.DictWriter(f, fieldnames=keys)
-            writer.writeheader()
-            for method_name, metric_values in metrics_by_method.items():
-                row = {'method': method_name}
-                row.update(metric_values)
-                writer.writerow(row)
-        print(f'Метрики сохранены: {csv_path}')
-
     def batch_process(self, test_color='all', test_category='all', max_images=20):
-        from torchvision import transforms
-        transform = transforms.Compose([
-            transforms.Resize(self.config.IMG_SIZE),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
-
-        test_dataset = HalftoningDataset(
-            self.config.DATASET_PATH,
-            mode='test', color_type=test_color, category=test_category,
-            transform=transform, target_size=self.config.IMG_SIZE
-        )
-        if len(test_dataset) == 0:
-            print('Нет тестовых изображений')
-            return []
-
         results = []
-        gray_refs = []
-        adaptive_preds = []
+        test_dir = os.path.join(self.config.DATASET_PATH, 'test')
+        if not os.path.exists(test_dir):
+            print(f'Тестовая папка не найдена: {test_dir}')
+            return results
 
-        for i in range(min(len(test_dataset), max_images)):
-            img_path = test_dataset.image_paths[i]
-            result = self.process_image(img_path, save_results=True)
+        image_extensions = tuple(self.config.IMAGE_EXTENSIONS)
+        image_paths = []
+        for root, _, files in os.walk(test_dir):
+            for file in files:
+                if file.lower().endswith(image_extensions):
+                    image_paths.append(os.path.join(root, file))
+
+        if test_color != 'all':
+            image_paths = [p for p in image_paths if test_color in p]
+        if test_category != 'all':
+            image_paths = [p for p in image_paths if test_category in p]
+
+        for image_path in image_paths[:max_images]:
+            result = self.process_image(image_path, save_results=True)
             if result:
                 results.append(result)
-                image = Image.open(img_path).convert('RGB')
-                image_np = np.array(image.resize(self.config.IMG_SIZE), dtype=np.float32) / 255.0
-                gray_refs.append(0.299 * image_np[:, :, 0] + 0.587 * image_np[:, :, 1] + 0.114 * image_np[:, :, 2])
-                adaptive_preds.append(self.halftoner.adaptive_halftoning(image_np, self.model, self.device))
-
-        if results:
-            fid_value = fid_metric(gray_refs, adaptive_preds)
-            self._save_summary_report(results, fid_value)
-            self._print_summary_statistics(results, fid_value)
 
         return results
-
-    def _print_summary_statistics(self, results, fid_value=None):
-        adaptive_ssim = [r['metrics']['Adaptive']['SSIM'] for r in results]
-        adaptive_psnr = [r['metrics']['Adaptive']['PSNR'] for r in results]
-        adaptive_mse = [r['metrics']['Adaptive']['MSE'] for r in results]
-        adaptive_iou = [r['metrics']['Adaptive']['IoU'] for r in results]
-        print('\n' + '=' * 60)
-        print('ИТОГОВАЯ СТАТИСТИКА')
-        print('=' * 60)
-        print(f'Обработано изображений: {len(results)}')
-        print(f'Средний SSIM (Adaptive): {np.mean(adaptive_ssim):.4f}')
-        print(f'Средний PSNR (Adaptive): {np.mean(adaptive_psnr):.4f}')
-        print(f'Средний MSE (Adaptive): {np.mean(adaptive_mse):.6f}')
-        print(f'Средний IoU (Adaptive): {np.mean(adaptive_iou):.4f}')
-        if fid_value is not None:
-            print(f'FID-like score по батчу: {fid_value:.6f}')
-        print('=' * 60)
-
-    def _save_summary_report(self, results, fid_value=None):
-        report_path = os.path.join(self.config.OUTPUT_DIR, 'summary_report_metrics.csv')
-        fieldnames = ['image_name', 'method', 'SSIM', 'PSNR', 'MSE', 'IoU', 'LPIPS', 'BRISQUE', 'NIQE']
-        with open(report_path, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            for result in results:
-                for method_name, metric_values in result['metrics'].items():
-                    row = {'image_name': result['image_name'], 'method': method_name}
-                    row.update(metric_values)
-                    writer.writerow(row)
-        if fid_value is not None:
-            fid_path = os.path.join(self.config.METRICS_DIR, 'batch_fid.txt')
-            with open(fid_path, 'w', encoding='utf-8') as f:
-                f.write(f'FID-like score: {fid_value}\n')
-        print(f'Сводный отчет сохранен: {report_path}')
