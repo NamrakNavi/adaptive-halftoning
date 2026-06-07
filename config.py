@@ -4,10 +4,13 @@ import os
 class Config:
     def __init__(self):
         self.BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-        self.DATASET_PATH = os.path.join(self.BASE_DIR, "halftoning_dataset")
-        self.MODELS_DIR = os.path.join(self.BASE_DIR, "models", "saved")
-        self.MODEL_SAVE_PATH = os.path.join(self.MODELS_DIR, "adaptive_halftoning_model.pth")
-        self.OUTPUT_DIR = os.path.join(self.BASE_DIR, "results")
+        self.DATASET_PATH = os.path.join(self.BASE_DIR, 'halftoning_dataset')
+        self.MODELS_DIR = os.path.join(self.BASE_DIR, 'models', 'saved')
+        self.MODEL_SAVE_PATH = os.path.join(self.MODELS_DIR, 'adaptive_halftoning_model.pth')
+        self.OUTPUT_DIR = os.path.join(self.BASE_DIR, 'results')
+        self.LOGS_DIR = os.path.join(self.OUTPUT_DIR, 'logs')
+        self.PLOTS_DIR = os.path.join(self.OUTPUT_DIR, 'plots')
+        self.METRICS_DIR = os.path.join(self.OUTPUT_DIR, 'metrics')
 
         self.PATCH_SIZE = 8
         self.BATCH_SIZE = 16
@@ -25,12 +28,19 @@ class Config:
         self.MIX_WITH_ERROR_DIFFUSION = 0.35
         self.ENABLE_MEDIAN_POST = True
 
+        self.ENABLE_OPTIONAL_METRICS = True
+        self.ACTIVE_METRICS = ['SSIM', 'PSNR', 'MSE', 'IoU', 'LPIPS', 'BRISQUE', 'NIQE']
+        self.BATCH_METRICS = ['FID']
+
         self._create_directories()
 
     def _create_directories(self):
         directories = [
             self.MODELS_DIR,
             self.OUTPUT_DIR,
+            self.LOGS_DIR,
+            self.PLOTS_DIR,
+            self.METRICS_DIR,
             os.path.join(self.DATASET_PATH, 'train', 'colored', 'nature'),
             os.path.join(self.DATASET_PATH, 'train', 'colored', 'transport'),
             os.path.join(self.DATASET_PATH, 'train', 'black and white', 'nature'),
@@ -45,9 +55,13 @@ class Config:
 
     def update_dataset_path(self, new_path):
         self.DATASET_PATH = new_path
-        print(f"Путь к датасету обновлен: {new_path}")
+        print(f'Путь к датасету обновлен: {new_path}')
 
     def update_output_dir(self, new_dir):
         self.OUTPUT_DIR = new_dir
-        os.makedirs(self.OUTPUT_DIR, exist_ok=True)
-        print(f"Директория для результатов обновлена: {new_dir}")
+        self.LOGS_DIR = os.path.join(self.OUTPUT_DIR, 'logs')
+        self.PLOTS_DIR = os.path.join(self.OUTPUT_DIR, 'plots')
+        self.METRICS_DIR = os.path.join(self.OUTPUT_DIR, 'metrics')
+        for directory in [self.OUTPUT_DIR, self.LOGS_DIR, self.PLOTS_DIR, self.METRICS_DIR]:
+            os.makedirs(directory, exist_ok=True)
+        print(f'Директория для результатов обновлена: {new_dir}')
