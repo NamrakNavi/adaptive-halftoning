@@ -6,6 +6,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from PIL import Image
 from skimage.metrics import structural_similarity as ssim
+from DISTS_pytorch import DISTS          
 
 from models.unet import UNet
 from algorithms.halftoning_algorithms import HalftoningAlgorithms
@@ -25,6 +26,8 @@ class AdaptiveHalftoningSystem:
         self.halftoner = HalftoningAlgorithms(config)
         ensure_dir(config.OUTPUT_DIR)
         print(f'Используется устройство: {self.device}')
+
+        self.dists_metric = DISTS().to(self.device).eval()              # DISTS
 
     def create_dataloaders(self, train_color='all', train_category='all', test_color='all', test_category='all', transform=None):
         from torchvision import transforms
@@ -132,22 +135,51 @@ class AdaptiveHalftoningSystem:
         if image_np.ndim == 3:
             return (0.299 * image_np[:, :, 0] + 0.587 * image_np[:, :, 1] + 0.114 * image_np[:, :, 2]).astype(np.float32)
         return image_np.astype(np.float32)
+    
+    def _to_tensor_01(self, img_np: np.ndarray) -> torch.Tensor:
+        img = np.asarray(img_np, dtype=np.float32)
+        if img.max() > 1.0:
+            img = img / 255.0
+
+        if img.ndim == 2:
+            img = np.stack([img, img, img], axis=-1)  # gray → псевдо-RGB
+
+        img_chw = np.transpose(img, (2, 0, 1))       # HWC → CHW
+        tensor = torch.from_numpy(img_chw).unsqueeze(0).to(self.device)
+        return tensor
 
     def _calculate_metrics(self, reference, candidate):
         reference = np.clip(reference.astype(np.float32), 0.0, 1.0)
         candidate = np.clip(candidate.astype(np.float32), 0.0, 1.0)
+
+        # БАЗОВЫЕ МЕТРИКИ (как было)
         mse = float(np.mean((reference - candidate) ** 2))
         mae = float(np.mean(np.abs(reference - candidate)))
         rmse = float(np.sqrt(mse))
         psnr = float('inf') if mse <= 1e-12 else float(10.0 * np.log10(1.0 / mse))
         ssim_value = float(ssim(reference, candidate, data_range=1.0))
-        return {
+
+        metrics = {
             'SSIM': ssim_value,
             'PSNR': psnr,
             'MSE': mse,
             'MAE': mae,
             'RMSE': rmse,
         }
+
+
+        try:
+            ref_t = self._to_tensor_01(reference)
+            cand_t = self._to_tensor_01(candidate)
+
+            with torch.no_grad():
+                dists_val = float(self.dists_metric(ref_t, cand_t).item())
+                metrics['DISTS'] = dists_val
+                
+        except Exception as e:
+            print(f'Предупреждение: не удалось посчитать DISTS/IQT: {e}')
+
+        return metrics
 
     def _save_single_outputs(self, image_path, result):
         base_name = os.path.splitext(os.path.basename(image_path))[0]
