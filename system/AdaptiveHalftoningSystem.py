@@ -8,6 +8,7 @@ from PIL import Image
 from skimage.metrics import structural_similarity as ssim
 from DISTS_pytorch import DISTS          
 
+import time
 from models.unet import UNet
 from algorithms.halftoning_algorithms import HalftoningAlgorithms
 from data.dataset import HalftoningDataset
@@ -71,17 +72,45 @@ class AdaptiveHalftoningSystem:
         if train_loader is None or len(train_loader) == 0:
             print('Невозможно обучить модель: нет данных')
             return
+
         if epochs is None:
             epochs = self.config.EPOCHS
 
         self.model.train()
         losses = []
+
+        logs_dir = os.path.join(self.config.OUTPUT_DIR, 'logs')
+        os.makedirs(logs_dir, exist_ok=True)
+        log_path = os.path.join(logs_dir, 'training_log.txt')
+
+        def log(message=''):
+            print(message)
+            try:
+                with open(log_path, 'a', encoding='utf-8') as f:
+                    f.write(str(message) + '\n')
+            except Exception as e:
+                print(f'Предупреждение: не удалось записать в лог-файл: {e}')
+
+        log('=' * 60)
+        log('СТАРТ ОБУЧЕНИЯ')
+        log(f'Эпох: {epochs}')
+        log(f'Батчей в epoch (план): {len(train_loader)}')
+        log(f'Лог-файл: {log_path}')
+        log('=' * 60)
+
         for epoch in range(epochs):
             total_loss = 0.0
             num_batches = 0
-            for batch in train_loader:
+            total_batches = len(train_loader)
+
+            log()
+            log(f'--- Эпоха {epoch + 1}/{epochs} ---')
+
+            for batch_idx, batch in enumerate(train_loader, start=1):
                 if not isinstance(batch, (list, tuple)) or len(batch) != 2:
+                    log(f'Пропуск batch {batch_idx}: некорректный формат батча')
                     continue
+
                 images, targets = batch
                 images = images.to(self.device)
                 targets = targets.to(self.device)
@@ -89,23 +118,36 @@ class AdaptiveHalftoningSystem:
                 self.optimizer.zero_grad()
                 outputs = self.model(images)
                 loss = self.criterion(outputs, targets)
+
                 if torch.isnan(loss):
+                    log(f'Пропуск batch {batch_idx}/{total_batches}: loss = NaN')
                     continue
+
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 self.optimizer.step()
 
-                total_loss += float(loss.item())
+                loss_value = float(loss.item())
+                total_loss += loss_value
                 num_batches += 1
+
+                log(f'Batch {batch_idx}/{total_batches}, loss = {loss_value:.6f}')
 
             if num_batches > 0:
                 avg_loss = total_loss / num_batches
                 losses.append(avg_loss)
-                print(f'Epoch {epoch + 1}/{epochs}, loss = {avg_loss:.6f}')
+                log(f'Epoch {epoch + 1}/{epochs}, avg_loss = {avg_loss:.6f}')
+            else:
+                log(f'Epoch {epoch + 1}/{epochs}: нет корректных batch')
 
         self.save_model()
+
         if losses:
             plot_training_loss(losses, self.config.OUTPUT_DIR)
+
+        log('ОБУЧЕНИЕ ЗАВЕРШЕНО')
+        log(f'Модель сохранена: {self.config.MODEL_SAVE_PATH}')
+        log('=' * 60)
 
     def save_model(self, path=None):
         if path is None:
